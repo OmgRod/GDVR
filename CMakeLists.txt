@@ -18,6 +18,9 @@ add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
 setup_geode_mod(${PROJECT_NAME})
 
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(OPENXR_BUILD_LOADER ON CACHE BOOL "" FORCE)
+
 CPMAddPackage("gh:KhronosGroup/OpenXR-SDK#release-1.1.61")
 CPMAddPackage("gh:g-truc/glm#1.0.3")
 
