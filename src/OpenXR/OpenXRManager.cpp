@@ -4,10 +4,29 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/quaternion.hpp>
+#if defined(GEODE_IS_ANDROID)
+#include <Geode/cocos/platform/android/jni/JniHelper.h>
+#endif
 
 using namespace geode::prelude;
 
 bool OpenXRManager::initialise() {
+#if defined(GEODE_IS_ANDROID)
+    PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
+    if (XR_SUCCEEDED(xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction*)(&initializeLoader)))) {
+        XrLoaderInitInfoAndroidKHR loaderInitInfoAndroid = {XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
+        loaderInitInfoAndroid.applicationVM = cocos2d::JniHelper::getJavaVM();
+        
+        cocos2d::JniMethodInfo methodInfo;
+        if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo, "org/cocos2dx/lib/Cocos2dxActivity", "getContext", "()Landroid/content/Context;")) {
+            loaderInitInfoAndroid.applicationContext = methodInfo.env->CallStaticObjectMethod(methodInfo.classID, methodInfo.methodID);
+            methodInfo.env->DeleteLocalRef(methodInfo.classID);
+        }
+        
+        initializeLoader((const XrLoaderInitInfoBaseHeaderKHR*)&loaderInitInfoAndroid);
+    }
+#endif
+
     XrInstanceCreateInfo createInfo{XR_TYPE_INSTANCE_CREATE_INFO};
     strcpy(createInfo.applicationInfo.applicationName, "Geometry Dash VR");
     createInfo.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
