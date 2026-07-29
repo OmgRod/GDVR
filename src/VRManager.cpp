@@ -10,6 +10,7 @@ VRManager& VRManager::get() {
 
 bool VRManager::init() {
     if (m_initialised) return true;
+    if (m_initFailed) return false;
 
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
@@ -30,6 +31,7 @@ bool VRManager::init() {
     log::info("VRManager: Initializing OpenXR...");
     if (!m_openXR.initialise()) {
         log::error("VRManager: OpenXR initialization failed");
+        m_initFailed = true;
         return false;
     }
     

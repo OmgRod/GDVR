@@ -28,4 +28,5 @@ private:
     int m_width = 0;
     int m_height = 0;
     bool m_initialised = false;
+    bool m_initFailed = false;
 };
