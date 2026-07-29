@@ -17,15 +17,16 @@ bool OpenXRManager::initialise() {
         log::info("OpenXR: Found xrInitializeLoaderKHR");
         XrLoaderInitInfoAndroidKHR loaderInitInfoAndroid = {XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
         loaderInitInfoAndroid.applicationVM = cocos2d::JniHelper::getJavaVM();
+        loaderInitInfoAndroid.applicationContext = nullptr;
         
         cocos2d::JniMethodInfo methodInfo;
-        if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo, "org/cocos2dx/lib/Cocos2dxHelper", "getActivity", "()Landroid/app/Activity;")) {
+        if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo, "org/cocos2dx/lib/Cocos2dxActivity", "getContext", "()Landroid/content/Context;")) {
             loaderInitInfoAndroid.applicationContext = methodInfo.env->CallStaticObjectMethod(methodInfo.classID, methodInfo.methodID);
             methodInfo.env->DeleteLocalRef(methodInfo.classID);
-            log::info("OpenXR: Fetched Android Activity successfully (loader)");
+            log::info("OpenXR: Fetched Android Context successfully (loader)");
         } else {
-            methodInfo.env->ExceptionClear();
-            log::error("OpenXR: Failed to get Android Activity from Cocos2dxHelper (loader)");
+            clearJNIException();
+            log::error("OpenXR: Failed to get Android Context from Cocos2dxActivity (loader)");
         }
         
         XrResult initRes = initializeLoader((const XrLoaderInitInfoBaseHeaderKHR*)&loaderInitInfoAndroid);
@@ -47,15 +48,16 @@ bool OpenXRManager::initialise() {
 #if defined(GEODE_IS_ANDROID)
     XrInstanceCreateInfoAndroidKHR androidCreateInfo{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     androidCreateInfo.applicationVM = cocos2d::JniHelper::getJavaVM();
+    androidCreateInfo.applicationActivity = nullptr;
     
     cocos2d::JniMethodInfo methodInfo2;
-    if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo2, "org/cocos2dx/lib/Cocos2dxHelper", "getActivity", "()Landroid/app/Activity;")) {
+    if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo2, "org/cocos2dx/lib/Cocos2dxActivity", "getContext", "()Landroid/content/Context;")) {
         androidCreateInfo.applicationActivity = methodInfo2.env->CallStaticObjectMethod(methodInfo2.classID, methodInfo2.methodID);
         methodInfo2.env->DeleteLocalRef(methodInfo2.classID);
         log::info("OpenXR: Fetched Android Activity successfully (instance)");
     } else {
-        methodInfo2.env->ExceptionClear();
-        log::error("OpenXR: Failed to get Android Activity from Cocos2dxHelper (instance)");
+        clearJNIException();
+        log::error("OpenXR: Failed to get Android Activity from Cocos2dxActivity (instance)");
     }
     
     createInfo.next = &androidCreateInfo;
