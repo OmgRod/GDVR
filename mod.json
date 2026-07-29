@@ -1,0 +1,12 @@
+{
+	"geode": "5.8.2",
+	"gd": {
+		"win": "2.2081"
+	},
+	"id": "omgrod.gdvr",
+	"name": "GDVR",
+	"version": "v1.0.0",
+	"developer": "OmgRod",
+	"description": "This mod turns Geometry Dash into a VR game.",
+	"early-load": true
+}
