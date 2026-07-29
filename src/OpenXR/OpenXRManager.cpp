@@ -14,6 +14,7 @@ bool OpenXRManager::initialise() {
 #if defined(GEODE_IS_ANDROID)
     PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
     if (XR_SUCCEEDED(xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction*)(&initializeLoader)))) {
+        log::info("OpenXR: Found xrInitializeLoaderKHR");
         XrLoaderInitInfoAndroidKHR loaderInitInfoAndroid = {XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
         loaderInitInfoAndroid.applicationVM = cocos2d::JniHelper::getJavaVM();
         
@@ -21,24 +22,48 @@ bool OpenXRManager::initialise() {
         if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo, "org/cocos2dx/lib/Cocos2dxActivity", "getContext", "()Landroid/content/Context;")) {
             loaderInitInfoAndroid.applicationContext = methodInfo.env->CallStaticObjectMethod(methodInfo.classID, methodInfo.methodID);
             methodInfo.env->DeleteLocalRef(methodInfo.classID);
+            log::info("OpenXR: Fetched Android Context successfully");
+        } else {
+            log::error("OpenXR: Failed to get Android Context");
         }
         
-        initializeLoader((const XrLoaderInitInfoBaseHeaderKHR*)&loaderInitInfoAndroid);
+        XrResult initRes = initializeLoader((const XrLoaderInitInfoBaseHeaderKHR*)&loaderInitInfoAndroid);
+        log::info("OpenXR: initializeLoader result: {}", (int)initRes);
+    } else {
+        log::error("OpenXR: Failed to get xrInitializeLoaderKHR proc addr");
     }
 #endif
 
     const char* extensions[] = {
-        "XR_KHR_opengl_es_enable"
+        "XR_KHR_opengl_es_enable",
+#if defined(GEODE_IS_ANDROID)
+        "XR_KHR_android_create_instance"
+#endif
     };
 
     XrInstanceCreateInfo createInfo{XR_TYPE_INSTANCE_CREATE_INFO};
+    
+#if defined(GEODE_IS_ANDROID)
+    XrInstanceCreateInfoAndroidKHR androidCreateInfo{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
+    androidCreateInfo.applicationVM = cocos2d::JniHelper::getJavaVM();
+    
+    cocos2d::JniMethodInfo methodInfo;
+    if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo, "org/cocos2dx/lib/Cocos2dxActivity", "getContext", "()Landroid/content/Context;")) {
+        androidCreateInfo.applicationActivity = methodInfo.env->CallStaticObjectMethod(methodInfo.classID, methodInfo.methodID);
+        methodInfo.env->DeleteLocalRef(methodInfo.classID);
+    }
+    
+    createInfo.next = &androidCreateInfo;
+#endif
+
     strcpy(createInfo.applicationInfo.applicationName, "Geometry Dash VR");
     createInfo.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
-    createInfo.enabledExtensionCount = 1;
+    createInfo.enabledExtensionCount = sizeof(extensions) / sizeof(extensions[0]);
     createInfo.enabledExtensionNames = extensions;
 
-    if (XR_FAILED(xrCreateInstance(&createInfo, &m_instance))) {
-        log::error("OpenXR: Failed to create instance");
+    XrResult res = xrCreateInstance(&createInfo, &m_instance);
+    if (XR_FAILED(res)) {
+        log::error("OpenXR: Failed to create instance, result code: {}", (int)res);
         return false;
     }
     log::info("OpenXR: Instance created successfully");
