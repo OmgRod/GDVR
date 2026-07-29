@@ -1,5 +1,8 @@
 #include "OpenXRManager.hpp"
 #include <EGL/egl.h>
+#include <glm/gtc/matrix_transform.hpp>
+
+using namespace geode::prelude;
 
 bool OpenXRManager::initialise() {
     XrInstanceCreateInfo createInfo{XR_TYPE_INSTANCE_CREATE_INFO};
@@ -15,12 +18,20 @@ bool OpenXRManager::initialise() {
     if (!createSession()) return false;
     if (!createSwapchain()) return false;
 
+    // Create reference space for tracking
+    XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+    spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+    spaceCreateInfo.poseInReferenceSpace = {{0,0,0,1}, {0,0,0}};
+    if (XR_FAILED(xrCreateReferenceSpace(m_session, &spaceCreateInfo, &m_localSpace))) {
+        log::error("Failed to create OpenXR reference space");
+        return false;
+    }
+
     m_running = true;
     return true;
 }
 
 bool OpenXRManager::createSession() {
-    // EGL bindings mapped directly from current Cocos2d-x rendering thread
     XrGraphicsBindingOpenGLESAndroidKHR binding{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
     binding.display = eglGetCurrentDisplay();
     binding.config = (EGLConfig)0; 
@@ -37,7 +48,7 @@ bool OpenXRManager::createSwapchain() {
     XrSwapchainCreateInfo swapchainCreateInfo{XR_TYPE_SWAPCHAIN_CREATE_INFO};
     swapchainCreateInfo.width = 2048; 
     swapchainCreateInfo.height = 2048;
-    swapchainCreateInfo.format = 0x1908; // GL_RGBA hex value
+    swapchainCreateInfo.format = 0x1908; // GL_RGBA
     swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
     
     for (int i = 0; i < 2; ++i) {
@@ -55,6 +66,8 @@ bool OpenXRManager::createSwapchain() {
 }
 
 bool OpenXRManager::waitFrame(XrTime* displayTime) {
+    if (!m_sessionActive) return false;
+
     XrFrameWaitInfo info{XR_TYPE_FRAME_WAIT_INFO};
     XrFrameState state{XR_TYPE_FRAME_STATE};
     if (XR_FAILED(xrWaitFrame(m_session, &info, &state))) return false;
@@ -66,6 +79,37 @@ bool OpenXRManager::waitFrame(XrTime* displayTime) {
 void OpenXRManager::beginFrame() {
     XrFrameBeginInfo info{XR_TYPE_FRAME_BEGIN_INFO};
     xrBeginFrame(m_session, &info);
+}
+
+void OpenXRManager::locateViews() {
+    XrViewLocateInfo locateInfo{XR_TYPE_VIEW_LOCATE_INFO};
+    locateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    locateInfo.displayTime = m_predictedDisplayTime;
+    locateInfo.space = m_localSpace;
+
+    XrViewState viewState{XR_TYPE_VIEW_STATE};
+    uint32_t viewCountOutput;
+    std::vector<XrView> views(2, {XR_TYPE_VIEW});
+    xrLocateViews(m_session, &locateInfo, &viewState, 2, &viewCountOutput, views.data());
+
+    for (int i = 0; i < 2; ++i) {
+        m_eyes[i].view = views[i];
+        
+        // Simple perspective projection from FOV
+        float nearZ = 0.1f;
+        float farZ = 100.0f;
+        float l = tanf(views[i].fov.angleLeft) * nearZ;
+        float r = tanf(views[i].fov.angleRight) * nearZ;
+        float t = tanf(views[i].fov.angleUp) * nearZ;
+        float b = tanf(views[i].fov.angleDown) * nearZ;
+        m_eyes[i].projection = glm::frustum(l, r, b, t, nearZ, farZ);
+
+        // Convert pose to view matrix
+        XrPosef pose = views[i].pose;
+        glm::vec3 pos(pose.position.x, pose.position.y, pose.position.z);
+        glm::quat rot(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+        m_eyes[i].viewMatrix = glm::translate(glm::mat4_cast(glm::conjugate(rot)), -pos);
+    }
 }
 
 GLuint OpenXRManager::acquireImage(const EyeData& eye) {
@@ -84,16 +128,54 @@ void OpenXRManager::releaseImage(const EyeData& eye) {
 }
 
 void OpenXRManager::submitFrame(const std::vector<EyeData>& eyes) {
+    XrCompositionLayerProjectionView projViews[2];
+    for (int i = 0; i < 2; ++i) {
+        projViews[i] = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+        projViews[i].pose = eyes[i].view.pose;
+        projViews[i].fov = eyes[i].view.fov;
+        projViews[i].subImage = {eyes[i].swapchain, {{0,0}, {2048,2048}}, 0};
+    }
+
+    XrCompositionLayerProjection projectionLayer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+    projectionLayer.space = m_localSpace;
+    projectionLayer.viewCount = 2;
+    projectionLayer.views = projViews;
+
+    const XrCompositionLayerBaseHeader* layers[] = {
+        (const XrCompositionLayerBaseHeader*)&projectionLayer
+    };
+
     XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
     endInfo.displayTime = m_predictedDisplayTime;
     endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    endInfo.layerCount = 1;
+    endInfo.layers = layers;
+
     xrEndFrame(m_session, &endInfo);
 }
 
 void OpenXRManager::shutdown() {
+    if (m_localSpace != XR_NULL_HANDLE) xrDestroySpace(m_localSpace);
     for (auto& eye : m_eyes) if (eye.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(eye.swapchain);
     if (m_session != XR_NULL_HANDLE) xrDestroySession(m_session);
     if (m_instance != XR_NULL_HANDLE) xrDestroyInstance(m_instance);
 }
 
-void OpenXRManager::pollEvents() {}
+void OpenXRManager::pollEvents() {
+    XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
+    while (xrPollEvent(m_instance, &event) == XR_SUCCESS) {
+        if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+            auto* sessionEvent = (XrEventDataSessionStateChanged*)&event;
+            if (sessionEvent->state == XR_SESSION_STATE_READY) {
+                XrSessionBeginInfo beginInfo{XR_TYPE_SESSION_BEGIN_INFO};
+                beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+                xrBeginSession(m_session, &beginInfo);
+                m_sessionActive = true;
+            } else if (sessionEvent->state == XR_SESSION_STATE_STOPPING) {
+                xrEndSession(m_session);
+                m_sessionActive = false;
+            }
+        }
+        event = {XR_TYPE_EVENT_DATA_BUFFER};
+    }
+}

@@ -11,7 +11,6 @@ VRManager& VRManager::get() {
 bool VRManager::init() {
     if (m_initialised) return true;
 
-    // Viewport dimensions are usually captured here; ensure valid GL context.
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
 
@@ -19,7 +18,6 @@ bool VRManager::init() {
     m_height = viewport[3];
 
     if (m_width <= 0 || m_height <= 0) {
-        // Log an error but try to continue, maybe default to 1920x1080
         m_width = 1920; m_height = 1080;
     }
 
@@ -35,6 +33,9 @@ bool VRManager::init() {
 void VRManager::update() {
     if (!m_initialised) return;
 
+    // Process OpenXR event state machine transitions (IDLE -> READY -> RUNNING)
+    m_openXR.pollEvents();
+
     captureGDFrame();
 
     XrTime displayTime;
@@ -42,25 +43,23 @@ void VRManager::update() {
     
     m_openXR.beginFrame();
     
+    // Retrieve eye tracking data from reference space
+    m_openXR.locateViews();
+    
     auto& eyes = m_openXR.getEyes();
     for (const auto& eye : eyes) {
         GLuint image = m_openXR.acquireImage(eye);
         
-        // Render
         m_renderer.renderEye(m_gdTexture, eye.viewMatrix, eye.projection);
         
         m_openXR.releaseImage(eye);
     }
     
     m_openXR.submitFrame(eyes);
-    
-    // Final step: draw to desktop monitor for Steam Link
-    m_renderer.drawToScreen(m_gdTexture);
 }
 
 void VRManager::captureGDFrame() {
     glBindTexture(GL_TEXTURE_2D, m_gdTexture);
-    // Copy the current backbuffer to our texture
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_width, m_height);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
