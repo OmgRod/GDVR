@@ -35,16 +35,16 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 if(GEODE_IS_ANDROID)
+    find_library(EGL_LIB EGL)
+    find_library(GLES_LIB GLESv3)
 
     target_link_libraries(${PROJECT_NAME}
-        EGL
-        GLESv3
+        ${EGL_LIB}
+        ${GLES_LIB}
     )
 
 elseif(GEODE_IS_WINDOWS)
-
     target_link_libraries(${PROJECT_NAME}
         opengl32
     )
-
 endif()
