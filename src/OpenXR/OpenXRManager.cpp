@@ -149,8 +149,9 @@ bool OpenXRManager::initialise() {
     XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
     spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
     spaceCreateInfo.poseInReferenceSpace = {{0,0,0,1}, {0,0,0}};
-    if (XR_FAILED(xrCreateReferenceSpace(m_session, &spaceCreateInfo, &m_localSpace))) {
-        log::error("Failed to create OpenXR reference space");
+    XrResult spaceRes = xrCreateReferenceSpace(m_session, &spaceCreateInfo, &m_localSpace);
+    if (XR_FAILED(spaceRes)) {
+        log::error("OpenXR: Failed to create reference space, error code: {}", (int)spaceRes);
         return false;
     }
 
@@ -348,7 +349,11 @@ void OpenXRManager::shutdown() {
 
 void OpenXRManager::pollEvents() {
     XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
-    while (xrPollEvent(m_instance, &event) == XR_SUCCESS) {
+    XrResult pollRes;
+    
+    while ((pollRes = xrPollEvent(m_instance, &event)) == XR_SUCCESS) {
+        log::info("OpenXR: Received event type: {}", (int)event.type);
+        
         if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
             auto* sessionEvent = (XrEventDataSessionStateChanged*)&event;
             log::info("OpenXR: Session state changed to {}", (int)sessionEvent->state);
@@ -357,8 +362,13 @@ void OpenXRManager::pollEvents() {
                 log::info("OpenXR: Session state READY, beginning session...");
                 XrSessionBeginInfo beginInfo{XR_TYPE_SESSION_BEGIN_INFO};
                 beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                xrBeginSession(m_session, &beginInfo);
-                m_sessionActive = true;
+                XrResult beginRes = xrBeginSession(m_session, &beginInfo);
+                if (XR_FAILED(beginRes)) {
+                    log::error("OpenXR: Failed to begin session, error code: {}", (int)beginRes);
+                } else {
+                    log::info("OpenXR: Session begun successfully");
+                    m_sessionActive = true;
+                }
             } else if (sessionEvent->state == XR_SESSION_STATE_STOPPING) {
                 log::info("OpenXR: Session state STOPPING, ending session...");
                 xrEndSession(m_session);
@@ -369,5 +379,18 @@ void OpenXRManager::pollEvents() {
             }
         }
         event = {XR_TYPE_EVENT_DATA_BUFFER};
+    }
+    
+    if (pollRes != XR_EVENT_UNAVAILABLE) {
+        log::error("OpenXR: xrPollEvent failed with error code: {}", (int)pollRes);
+    }
+    
+    static int frameCounter = 0;
+    if (!m_sessionActive) {
+        if (++frameCounter % 60 == 0) {
+            log::info("OpenXR: Event loop pumping, waiting for session to become READY... (Currently not active)");
+        }
+    } else {
+        frameCounter = 0;
     }
 }
