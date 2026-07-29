@@ -166,6 +166,23 @@ bool OpenXRManager::createSession() {
     EGLint configId;
     eglQueryContext(binding.display, binding.context, EGL_CONFIG_ID, &configId);
     
+    // According to OpenXR spec, we must call xrGetOpenGLESGraphicsRequirementsKHR before xrCreateSession
+    PFN_xrGetOpenGLESGraphicsRequirementsKHR pfnGetOpenGLESGraphicsRequirementsKHR = nullptr;
+    xrGetInstanceProcAddr(m_instance, "xrGetOpenGLESGraphicsRequirementsKHR", (PFN_xrVoidFunction*)&pfnGetOpenGLESGraphicsRequirementsKHR);
+    
+    if (pfnGetOpenGLESGraphicsRequirementsKHR) {
+        XrGraphicsRequirementsOpenGLESKHR graphicsRequirements{XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR};
+        XrResult reqRes = pfnGetOpenGLESGraphicsRequirementsKHR(m_instance, m_systemId, &graphicsRequirements);
+        if (XR_FAILED(reqRes)) {
+            log::error("OpenXR: xrGetOpenGLESGraphicsRequirementsKHR failed: {}", (int)reqRes);
+            return false;
+        }
+        log::info("OpenXR: Fetched graphics requirements successfully");
+    } else {
+        log::error("OpenXR: Failed to get xrGetOpenGLESGraphicsRequirementsKHR proc addr");
+        return false;
+    }
+    
     EGLint numConfigs = 0;
     EGLConfig config = 0;
     EGLint attribs[] = { EGL_CONFIG_ID, configId, EGL_NONE };
@@ -176,7 +193,9 @@ bool OpenXRManager::createSession() {
     XrSessionCreateInfo createInfo{XR_TYPE_SESSION_CREATE_INFO};
     createInfo.next = &binding;
     createInfo.systemId = m_systemId;
-    if (XR_FAILED(xrCreateSession(m_instance, &createInfo, &m_session))) {
+    XrResult res = xrCreateSession(m_instance, &createInfo, &m_session);
+    if (XR_FAILED(res)) {
+        log::error("OpenXR: Failed to create session, error code: {}", (int)res);
         return false;
     }
     
