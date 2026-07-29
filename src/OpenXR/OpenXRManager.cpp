@@ -1,11 +1,11 @@
 #include "OpenXRManager.hpp"
 
-#if defined(GEODE_IS_WINDOWS)
+// We only need EGL headers for the platform binding, not GLES headers
+#if defined(GEODE_IS_ANDROID)
+#include <EGL/egl.h>
+#elif defined(GEODE_IS_WINDOWS)
 #include <windows.h>
 #include <GL/gl.h>
-#elif defined(GEODE_IS_ANDROID)
-#include <EGL/egl.h>
-#include <GLES3/gl3.h>
 #endif
 
 bool OpenXRManager::initialise() {
@@ -110,16 +110,6 @@ void OpenXRManager::shutdown() {
     for (auto& eye : m_eyes) if (eye.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(eye.swapchain);
     if (m_session != XR_NULL_HANDLE) xrDestroySession(m_session);
     if (m_instance != XR_NULL_HANDLE) xrDestroyInstance(m_instance);
-    m_running = false;
 }
 
-void OpenXRManager::pollEvents() {
-    XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
-    while (xrPollEvent(m_instance, &event) == XR_SUCCESS) {
-        if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
-            auto* sessionEvent = (XrEventDataSessionStateChanged*)&event;
-            if (sessionEvent->state == XR_SESSION_STATE_STOPPING) xrEndSession(m_session);
-        }
-        event = {XR_TYPE_EVENT_DATA_BUFFER};
-    }
-}
+void OpenXRManager::pollEvents() {}
