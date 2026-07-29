@@ -1,5 +1,13 @@
 #pragma once
-#include "OpenXRPlatform.hpp"
+#include <Geode/Geode.hpp>
+
+// Android-exclusive configuration
+#define XR_USE_PLATFORM_ANDROID
+#define XR_USE_GRAPHICS_API_OPENGL_ES
+#include <jni.h>
+#include <EGL/egl.h>
+#include <openxr/openxr.h>
+#include <openxr/openxr_platform.h>
 #include <vector>
 #include <glm/glm.hpp>
 

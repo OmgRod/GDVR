@@ -1,12 +1,5 @@
 #include "OpenXRManager.hpp"
-
-// We only need EGL headers for the platform binding, not GLES headers
-#if defined(GEODE_IS_ANDROID)
 #include <EGL/egl.h>
-#elif defined(GEODE_IS_WINDOWS)
-#include <windows.h>
-#include <GL/gl.h>
-#endif
 
 bool OpenXRManager::initialise() {
     XrInstanceCreateInfo createInfo{XR_TYPE_INSTANCE_CREATE_INFO};
@@ -27,16 +20,11 @@ bool OpenXRManager::initialise() {
 }
 
 bool OpenXRManager::createSession() {
-#if defined(GEODE_IS_WINDOWS)
-    XrGraphicsBindingOpenGLWin32KHR binding{XR_TYPE_GRAPHICS_BINDING_OPENGL_WIN32_KHR};
-    binding.hDC = wglGetCurrentDC();
-    binding.hGLRC = wglGetCurrentContext();
-#elif defined(GEODE_IS_ANDROID)
+    // EGL bindings mapped directly from current Cocos2d-x rendering thread
     XrGraphicsBindingOpenGLESAndroidKHR binding{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
     binding.display = eglGetCurrentDisplay();
     binding.config = (EGLConfig)0; 
     binding.context = eglGetCurrentContext();
-#endif
     
     XrSessionCreateInfo createInfo{XR_TYPE_SESSION_CREATE_INFO};
     createInfo.next = &binding;
@@ -49,7 +37,7 @@ bool OpenXRManager::createSwapchain() {
     XrSwapchainCreateInfo swapchainCreateInfo{XR_TYPE_SWAPCHAIN_CREATE_INFO};
     swapchainCreateInfo.width = 2048; 
     swapchainCreateInfo.height = 2048;
-    swapchainCreateInfo.format = 0x8058;
+    swapchainCreateInfo.format = 0x1908; // GL_RGBA hex value
     swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
     
     for (int i = 0; i < 2; ++i) {
@@ -59,11 +47,7 @@ bool OpenXRManager::createSwapchain() {
         xrEnumerateSwapchainImages(m_eyes[i].swapchain, 0, &imageCount, nullptr);
         m_eyes[i].images.resize(imageCount);
         
-#if defined(GEODE_IS_WINDOWS)
-        std::vector<XrSwapchainImageOpenGLKHR> images(imageCount, {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_KHR});
-#else
         std::vector<XrSwapchainImageOpenGLESKHR> images(imageCount, {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR});
-#endif
         xrEnumerateSwapchainImages(m_eyes[i].swapchain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)images.data());
         for(auto& img : images) m_eyes[i].images.push_back(img.image);
     }

@@ -21,21 +21,4 @@ setup_geode_mod(${PROJECT_NAME})
 CPMAddPackage("gh:KhronosGroup/OpenXR-SDK#release-1.1.61")
 CPMAddPackage("gh:g-truc/glm#1.0.3")
 
-
-target_link_libraries(${PROJECT_NAME}
-    OpenXR::openxr_loader
-    glm::glm
-)
-
-
-if(GEODE_IS_ANDROID)
-    target_link_libraries(${PROJECT_NAME}
-        GLESv3
-        log
-    )
-    target_link_libraries(${PROJECT_NAME}
-        "-Wl,--no-as-needed"
-        "-lEGL"
-        "-Wl,--as-needed"
-    )
-endif()
+target_link_libraries(${PROJECT_NAME} OpenXR::openxr_loader glm::glm EGL GLESv3)
