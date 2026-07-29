@@ -12,6 +12,14 @@ using namespace geode::prelude;
 
 bool OpenXRManager::initialise() {
 #if defined(GEODE_IS_ANDROID)
+    auto clearJNIException = []() {
+        auto vm = cocos2d::JniHelper::getJavaVM();
+        JNIEnv* env;
+        if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_OK) {
+            env->ExceptionClear();
+        }
+    };
+
     PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
     if (XR_SUCCEEDED(xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction*)(&initializeLoader)))) {
         log::info("OpenXR: Found xrInitializeLoaderKHR");
