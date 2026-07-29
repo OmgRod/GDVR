@@ -1,12 +1,14 @@
 cmake_minimum_required(VERSION 3.21)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+
 if ("${CMAKE_SYSTEM_NAME}" STREQUAL "iOS" OR IOS)
     set(CMAKE_OSX_ARCHITECTURES "arm64")
 else()
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 endif()
-set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 project(GDVR VERSION 1.0.0)
 
@@ -24,7 +26,8 @@ add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
 setup_geode_mod(${PROJECT_NAME})
 
-find_package(OpenGL REQUIRED COMPONENTS EGL OpenGLES)
+CPMAddPackage("gh:KhronosGroup/OpenXR-SDK#release-1.1.61")
+CPMAddPackage("gh:g-truc/glm#1.0.3")
 
 target_link_libraries(${PROJECT_NAME}
     OpenXR::openxr_loader
@@ -32,8 +35,16 @@ target_link_libraries(${PROJECT_NAME}
 )
 
 if(GEODE_IS_ANDROID)
+
     target_link_libraries(${PROJECT_NAME}
-        OpenGL::EGL
-        OpenGL::GLES3
+        EGL
+        GLESv3
     )
+
+elseif(GEODE_IS_WINDOWS)
+
+    target_link_libraries(${PROJECT_NAME}
+        opengl32
+    )
+
 endif()
