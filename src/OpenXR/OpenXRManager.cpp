@@ -1,3 +1,4 @@
+#define GLM_ENABLE_EXPERIMENTAL
 #include "OpenXRManager.hpp"
 #include <EGL/egl.h>
 #include <glm/gtc/matrix_transform.hpp>
