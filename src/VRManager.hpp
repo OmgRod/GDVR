@@ -14,6 +14,10 @@ public:
 
 private:
     VRManager() = default;
+    VRManager(const VRManager&) = delete;
+    VRManager& operator=(const VRManager&) = delete;
+    VRManager(VRManager&&) = delete;
+    VRManager& operator=(VRManager&&) = delete;
 
     bool createGDTexture();
     void captureGDFrame();

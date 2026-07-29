@@ -21,8 +21,19 @@ bool VRManager::init() {
         m_width = 1920; m_height = 1080;
     }
 
-    if (!createGDTexture()) return false;
-    if (!m_openXR.initialise()) return false;
+    log::info("VRManager: Creating GD texture...");
+    if (!createGDTexture()) {
+        log::error("VRManager: Failed to create GD texture");
+        return false;
+    }
+    
+    log::info("VRManager: Initializing OpenXR...");
+    if (!m_openXR.initialise()) {
+        log::error("VRManager: OpenXR initialization failed");
+        return false;
+    }
+    
+    log::info("VRManager: Initializing renderer...");
     m_renderer.initialise();
 
     m_initialised = true;

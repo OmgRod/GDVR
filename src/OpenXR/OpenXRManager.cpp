@@ -27,18 +27,41 @@ bool OpenXRManager::initialise() {
     }
 #endif
 
+    const char* extensions[] = {
+        "XR_KHR_opengl_es_enable"
+    };
+
     XrInstanceCreateInfo createInfo{XR_TYPE_INSTANCE_CREATE_INFO};
     strcpy(createInfo.applicationInfo.applicationName, "Geometry Dash VR");
     createInfo.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+    createInfo.enabledExtensionCount = 1;
+    createInfo.enabledExtensionNames = extensions;
 
-    if (XR_FAILED(xrCreateInstance(&createInfo, &m_instance))) return false;
+    if (XR_FAILED(xrCreateInstance(&createInfo, &m_instance))) {
+        log::error("OpenXR: Failed to create instance");
+        return false;
+    }
+    log::info("OpenXR: Instance created successfully");
 
     XrSystemGetInfo systemInfo{XR_TYPE_SYSTEM_GET_INFO};
     systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-    if (XR_FAILED(xrGetSystem(m_instance, &systemInfo, &m_systemId))) return false;
+    if (XR_FAILED(xrGetSystem(m_instance, &systemInfo, &m_systemId))) {
+        log::error("OpenXR: Failed to get system");
+        return false;
+    }
+    log::info("OpenXR: System retrieved successfully (ID: {})", m_systemId);
 
-    if (!createSession()) return false;
-    if (!createSwapchain()) return false;
+    log::info("OpenXR: Creating session...");
+    if (!createSession()) {
+        log::error("OpenXR: Failed to create session");
+        return false;
+    }
+    
+    log::info("OpenXR: Creating swapchain...");
+    if (!createSwapchain()) {
+        log::error("OpenXR: Failed to create swapchain");
+        return false;
+    }
 
     // Create reference space for tracking
     XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
@@ -56,13 +79,27 @@ bool OpenXRManager::initialise() {
 bool OpenXRManager::createSession() {
     XrGraphicsBindingOpenGLESAndroidKHR binding{XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
     binding.display = eglGetCurrentDisplay();
-    binding.config = (EGLConfig)0; 
     binding.context = eglGetCurrentContext();
+    
+    EGLint configId;
+    eglQueryContext(binding.display, binding.context, EGL_CONFIG_ID, &configId);
+    
+    EGLint numConfigs = 0;
+    EGLConfig config = 0;
+    EGLint attribs[] = { EGL_CONFIG_ID, configId, EGL_NONE };
+    eglChooseConfig(binding.display, attribs, &config, 1, &numConfigs);
+    
+    binding.config = config;
     
     XrSessionCreateInfo createInfo{XR_TYPE_SESSION_CREATE_INFO};
     createInfo.next = &binding;
     createInfo.systemId = m_systemId;
-    return XR_SUCCEEDED(xrCreateSession(m_instance, &createInfo, &m_session));
+    if (XR_FAILED(xrCreateSession(m_instance, &createInfo, &m_session))) {
+        return false;
+    }
+    
+    log::info("OpenXR: Session created successfully");
+    return true;
 }
 
 bool OpenXRManager::createSwapchain() {
@@ -74,7 +111,10 @@ bool OpenXRManager::createSwapchain() {
     swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
     
     for (int i = 0; i < 2; ++i) {
-        if (XR_FAILED(xrCreateSwapchain(m_session, &swapchainCreateInfo, &m_eyes[i].swapchain))) return false;
+        if (XR_FAILED(xrCreateSwapchain(m_session, &swapchainCreateInfo, &m_eyes[i].swapchain))) {
+            log::error("OpenXR: Failed to create swapchain for eye {}", i);
+            return false;
+        }
         
         uint32_t imageCount;
         xrEnumerateSwapchainImages(m_eyes[i].swapchain, 0, &imageCount, nullptr);
@@ -84,6 +124,7 @@ bool OpenXRManager::createSwapchain() {
         xrEnumerateSwapchainImages(m_eyes[i].swapchain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)images.data());
         for(auto& img : images) m_eyes[i].images.push_back(img.image);
     }
+    log::info("OpenXR: Swapchain created successfully");
     return true;
 }
 
@@ -189,11 +230,13 @@ void OpenXRManager::pollEvents() {
         if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
             auto* sessionEvent = (XrEventDataSessionStateChanged*)&event;
             if (sessionEvent->state == XR_SESSION_STATE_READY) {
+                log::info("OpenXR: Session state READY, beginning session...");
                 XrSessionBeginInfo beginInfo{XR_TYPE_SESSION_BEGIN_INFO};
                 beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
                 xrBeginSession(m_session, &beginInfo);
                 m_sessionActive = true;
             } else if (sessionEvent->state == XR_SESSION_STATE_STOPPING) {
+                log::info("OpenXR: Session state STOPPING, ending session...");
                 xrEndSession(m_session);
                 m_sessionActive = false;
             }
