@@ -49,7 +49,7 @@ bool OpenXRManager::createSwapchain() {
     XrSwapchainCreateInfo swapchainCreateInfo{XR_TYPE_SWAPCHAIN_CREATE_INFO};
     swapchainCreateInfo.width = 2048; 
     swapchainCreateInfo.height = 2048;
-    swapchainCreateInfo.format = GL_RGBA8;
+    swapchainCreateInfo.format = 0x8058;
     swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
     
     for (int i = 0; i < 2; ++i) {
