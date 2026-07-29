@@ -24,6 +24,16 @@ add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
 setup_geode_mod(${PROJECT_NAME})
 
-CPMAddPackage("gh:KhronosGroup/OpenXR-SDK#release-1.1.61")
-CPMAddPackage("gh:g-truc/glm#1.0.3")
-target_link_libraries(${PROJECT_NAME} OpenXR::openxr_loader glm::glm)
+find_package(OpenGL REQUIRED COMPONENTS EGL OpenGLES)
+
+target_link_libraries(${PROJECT_NAME}
+    OpenXR::openxr_loader
+    glm::glm
+)
+
+if(GEODE_IS_ANDROID)
+    target_link_libraries(${PROJECT_NAME}
+        OpenGL::EGL
+        OpenGL::GLES3
+    )
+endif()
