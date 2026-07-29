@@ -12,35 +12,80 @@ using namespace geode::prelude;
 
 bool OpenXRManager::initialise() {
 #if defined(GEODE_IS_ANDROID)
-    auto clearJNIException = []() {
-        auto vm = cocos2d::JniHelper::getJavaVM();
-        JNIEnv* env;
-        if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_OK) {
-            env->ExceptionClear();
+    // Get JNIEnv safely from the JavaVM
+    JavaVM* vm = cocos2d::JniHelper::getJavaVM();
+    JNIEnv* env = nullptr;
+    bool didAttach = false;
+    
+    jint envResult = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (envResult == JNI_EDETACHED) {
+        log::info("OpenXR: JNI thread not attached, attaching...");
+        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+            log::error("OpenXR: Failed to attach JNI thread");
+            return false;
         }
-    };
-
+        didAttach = true;
+    } else if (envResult != JNI_OK || env == nullptr) {
+        log::error("OpenXR: Failed to get JNIEnv, result: {}", (int)envResult);
+        return false;
+    }
+    log::info("OpenXR: JNIEnv acquired successfully");
+    
+    // Use android.app.ActivityThread.currentApplication() to get the app context.
+    // This is a standard Android API that works regardless of what Activity class
+    // the Geode launcher uses (unlike Cocos2dxActivity.getContext() which doesn't exist).
+    jobject appContext = nullptr;
+    jclass activityThreadClass = env->FindClass("android/app/ActivityThread");
+    if (activityThreadClass && !env->ExceptionCheck()) {
+        jmethodID currentAppMethod = env->GetStaticMethodID(activityThreadClass, "currentApplication", "()Landroid/app/Application;");
+        if (currentAppMethod && !env->ExceptionCheck()) {
+            appContext = env->CallStaticObjectMethod(activityThreadClass, currentAppMethod);
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                appContext = nullptr;
+                log::error("OpenXR: Exception calling ActivityThread.currentApplication()");
+            } else if (appContext != nullptr) {
+                log::info("OpenXR: Got Android Application context via ActivityThread");
+            } else {
+                log::error("OpenXR: ActivityThread.currentApplication() returned null");
+            }
+        } else {
+            env->ExceptionClear();
+            log::error("OpenXR: Could not find currentApplication method");
+        }
+        env->DeleteLocalRef(activityThreadClass);
+    } else {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        log::error("OpenXR: Could not find ActivityThread class");
+    }
+    
+    if (appContext == nullptr) {
+        log::error("OpenXR: No Android context available, cannot initialize OpenXR");
+        if (didAttach) vm->DetachCurrentThread();
+        return false;
+    }
+    
+    // Initialize the OpenXR loader with the Android context
     PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
     if (XR_SUCCEEDED(xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction*)(&initializeLoader)))) {
         log::info("OpenXR: Found xrInitializeLoaderKHR");
         XrLoaderInitInfoAndroidKHR loaderInitInfoAndroid = {XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
-        loaderInitInfoAndroid.applicationVM = cocos2d::JniHelper::getJavaVM();
-        loaderInitInfoAndroid.applicationContext = nullptr;
-        
-        cocos2d::JniMethodInfo methodInfo;
-        if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo, "org/cocos2dx/lib/Cocos2dxActivity", "getContext", "()Landroid/content/Context;")) {
-            loaderInitInfoAndroid.applicationContext = methodInfo.env->CallStaticObjectMethod(methodInfo.classID, methodInfo.methodID);
-            methodInfo.env->DeleteLocalRef(methodInfo.classID);
-            log::info("OpenXR: Fetched Android Context successfully (loader)");
-        } else {
-            clearJNIException();
-            log::error("OpenXR: Failed to get Android Context from Cocos2dxActivity (loader)");
-        }
+        loaderInitInfoAndroid.applicationVM = vm;
+        loaderInitInfoAndroid.applicationContext = appContext;
         
         XrResult initRes = initializeLoader((const XrLoaderInitInfoBaseHeaderKHR*)&loaderInitInfoAndroid);
         log::info("OpenXR: initializeLoader result: {}", (int)initRes);
+        if (XR_FAILED(initRes)) {
+            log::error("OpenXR: Loader initialization failed");
+            env->DeleteLocalRef(appContext);
+            if (didAttach) vm->DetachCurrentThread();
+            return false;
+        }
     } else {
         log::error("OpenXR: Failed to get xrInitializeLoaderKHR proc addr");
+        env->DeleteLocalRef(appContext);
+        if (didAttach) vm->DetachCurrentThread();
+        return false;
     }
 #endif
 
@@ -55,18 +100,8 @@ bool OpenXRManager::initialise() {
     
 #if defined(GEODE_IS_ANDROID)
     XrInstanceCreateInfoAndroidKHR androidCreateInfo{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
-    androidCreateInfo.applicationVM = cocos2d::JniHelper::getJavaVM();
-    androidCreateInfo.applicationActivity = nullptr;
-    
-    cocos2d::JniMethodInfo methodInfo2;
-    if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo2, "org/cocos2dx/lib/Cocos2dxActivity", "getContext", "()Landroid/content/Context;")) {
-        androidCreateInfo.applicationActivity = methodInfo2.env->CallStaticObjectMethod(methodInfo2.classID, methodInfo2.methodID);
-        methodInfo2.env->DeleteLocalRef(methodInfo2.classID);
-        log::info("OpenXR: Fetched Android Activity successfully (instance)");
-    } else {
-        clearJNIException();
-        log::error("OpenXR: Failed to get Android Activity from Cocos2dxActivity (instance)");
-    }
+    androidCreateInfo.applicationVM = vm;
+    androidCreateInfo.applicationActivity = appContext;
     
     createInfo.next = &androidCreateInfo;
 #endif
@@ -77,6 +112,13 @@ bool OpenXRManager::initialise() {
     createInfo.enabledExtensionNames = extensions;
 
     XrResult res = xrCreateInstance(&createInfo, &m_instance);
+    
+#if defined(GEODE_IS_ANDROID)
+    // Clean up JNI references now that xrCreateInstance has consumed them
+    env->DeleteLocalRef(appContext);
+    if (didAttach) vm->DetachCurrentThread();
+#endif
+    
     if (XR_FAILED(res)) {
         log::error("OpenXR: Failed to create instance, result code: {}", (int)res);
         return false;
