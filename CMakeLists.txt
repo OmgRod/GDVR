@@ -30,8 +30,12 @@ target_link_libraries(${PROJECT_NAME}
 
 if(GEODE_IS_ANDROID)
     target_link_libraries(${PROJECT_NAME}
-        EGL
         GLESv3
         log
+    )
+    target_link_libraries(${PROJECT_NAME}
+        "-Wl,--no-as-needed"
+        "-lEGL"
+        "-Wl,--as-needed"
     )
 endif()
