@@ -205,15 +205,36 @@ bool OpenXRManager::createSession() {
 
 bool OpenXRManager::createSwapchain() {
     m_eyes.resize(2);
+    uint32_t formatCount = 0;
+    xrEnumerateSwapchainFormats(m_session, 0, &formatCount, nullptr);
+    std::vector<int64_t> formats(formatCount);
+    xrEnumerateSwapchainFormats(m_session, formatCount, &formatCount, formats.data());
+    
+    int64_t selectedFormat = 0;
+    for (int64_t f : formats) {
+        if (f == 0x8058 /* GL_RGBA8 */ || f == 0x8C43 /* GL_SRGB8_ALPHA8 */) {
+            selectedFormat = f;
+            break;
+        }
+    }
+    if (selectedFormat == 0 && formatCount > 0) {
+        selectedFormat = formats[0]; // fallback to first supported
+    }
+
     XrSwapchainCreateInfo swapchainCreateInfo{XR_TYPE_SWAPCHAIN_CREATE_INFO};
     swapchainCreateInfo.width = 2048; 
     swapchainCreateInfo.height = 2048;
-    swapchainCreateInfo.format = 0x1908; // GL_RGBA
+    swapchainCreateInfo.format = selectedFormat;
     swapchainCreateInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchainCreateInfo.sampleCount = 1;
+    swapchainCreateInfo.faceCount = 1;
+    swapchainCreateInfo.arraySize = 1;
+    swapchainCreateInfo.mipCount = 1;
     
     for (int i = 0; i < 2; ++i) {
-        if (XR_FAILED(xrCreateSwapchain(m_session, &swapchainCreateInfo, &m_eyes[i].swapchain))) {
-            log::error("OpenXR: Failed to create swapchain for eye {}", i);
+        XrResult res = xrCreateSwapchain(m_session, &swapchainCreateInfo, &m_eyes[i].swapchain);
+        if (XR_FAILED(res)) {
+            log::error("OpenXR: Failed to create swapchain for eye {}, error code: {}", i, (int)res);
             return false;
         }
         
