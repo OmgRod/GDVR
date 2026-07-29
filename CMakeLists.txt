@@ -21,6 +21,8 @@ setup_geode_mod(${PROJECT_NAME})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(OPENXR_BUILD_LOADER ON CACHE BOOL "" FORCE)
 
+set(DYNAMIC_LOADER OFF CACHE BOOL "Build OpenXR as a static library" FORCE)
+
 CPMAddPackage("gh:KhronosGroup/OpenXR-SDK#release-1.1.61")
 CPMAddPackage("gh:g-truc/glm#1.0.3")
 
