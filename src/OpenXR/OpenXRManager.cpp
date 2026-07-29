@@ -351,6 +351,8 @@ void OpenXRManager::pollEvents() {
     while (xrPollEvent(m_instance, &event) == XR_SUCCESS) {
         if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
             auto* sessionEvent = (XrEventDataSessionStateChanged*)&event;
+            log::info("OpenXR: Session state changed to {}", (int)sessionEvent->state);
+            
             if (sessionEvent->state == XR_SESSION_STATE_READY) {
                 log::info("OpenXR: Session state READY, beginning session...");
                 XrSessionBeginInfo beginInfo{XR_TYPE_SESSION_BEGIN_INFO};
@@ -360,6 +362,9 @@ void OpenXRManager::pollEvents() {
             } else if (sessionEvent->state == XR_SESSION_STATE_STOPPING) {
                 log::info("OpenXR: Session state STOPPING, ending session...");
                 xrEndSession(m_session);
+                m_sessionActive = false;
+            } else if (sessionEvent->state == XR_SESSION_STATE_EXITING || sessionEvent->state == XR_SESSION_STATE_LOSS_PENDING) {
+                log::info("OpenXR: Session exiting or loss pending");
                 m_sessionActive = false;
             }
         }
