@@ -43,13 +43,37 @@ bool OpenXRManager::initialise() {
     }
 
 
-    // Get actual Activity
-    jobject activity = cocos2d::JniHelper::getActivity();
+    // Geode 5.8.2 exposes getJavaVM(), but not JniHelper::getActivity().
+    // Cocos2dxHelper keeps the real Activity in a static field after startup.
+    // An Application object is not sufficient for
+    // XrInstanceCreateInfoAndroidKHR::applicationActivity.
+    jclass helperClass = env->FindClass("org/cocos2dx/lib/Cocos2dxHelper");
+    if (!helperClass || env->ExceptionCheck()) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        log::error("OpenXR: Could not find org.cocos2dx.lib.Cocos2dxHelper");
+        if (attached) vm->DetachCurrentThread();
+        return false;
+    }
 
-    if (!activity) {
-        log::error("OpenXR: Failed getting Android Activity");
-        if (attached)
-            vm->DetachCurrentThread();
+    jfieldID activityField = env->GetStaticFieldID(
+        helperClass,
+        "sActivity",
+        "Landroid/app/Activity;"
+    );
+    if (!activityField || env->ExceptionCheck()) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(helperClass);
+        log::error("OpenXR: Could not find Cocos2dxHelper.sActivity");
+        if (attached) vm->DetachCurrentThread();
+        return false;
+    }
+
+    jobject activity = env->GetStaticObjectField(helperClass, activityField);
+    env->DeleteLocalRef(helperClass);
+    if (!activity || env->ExceptionCheck()) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        log::error("OpenXR: Cocos2dxHelper.sActivity is null");
+        if (attached) vm->DetachCurrentThread();
         return false;
     }
 
@@ -94,6 +118,8 @@ bool OpenXRManager::initialise() {
 
     if (XR_FAILED(initResult)) {
         log::error("OpenXR: Loader failed");
+        env->DeleteLocalRef(activity);
+        if (attached) vm->DetachCurrentThread();
         return false;
     }
 
@@ -144,8 +170,8 @@ bool OpenXRManager::initialise() {
         );
 
 
-    if (attached)
-        vm->DetachCurrentThread();
+    env->DeleteLocalRef(activity);
+    if (attached) vm->DetachCurrentThread();
 
 
     if (XR_FAILED(res)) {
