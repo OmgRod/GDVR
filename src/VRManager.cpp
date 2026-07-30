@@ -132,43 +132,21 @@ void VRManager::update() {
 }
 
 void VRManager::captureGDFrame() {
-
     GLint oldFBO = 0;
+    GLint oldActiveTexture = 0;
+    GLint oldTexture = 0;
 
-    glGetIntegerv(
-        GL_FRAMEBUFFER_BINDING,
-        &oldFBO
-    );
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &oldFBO);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &oldActiveTexture);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture);
 
+    glBindTexture(GL_TEXTURE_2D, m_gdTexture);
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_width, m_height);
 
-    glBindTexture(
-        GL_TEXTURE_2D,
-        m_gdTexture
-    );
-
-
-    glCopyTexSubImage2D(
-        GL_TEXTURE_2D,
-        0,
-        0,
-        0,
-        0,
-        0,
-        m_width,
-        m_height
-    );
-
-
-    glBindTexture(
-        GL_TEXTURE_2D,
-        0
-    );
-
-
-    glBindFramebuffer(
-        GL_FRAMEBUFFER,
-        oldFBO
-    );
+    glBindTexture(GL_TEXTURE_2D, oldTexture);
+    glActiveTexture(oldActiveTexture);
+    glBindFramebuffer(GL_FRAMEBUFFER, oldFBO);
 }
 
 bool VRManager::createGDTexture() {

@@ -1,7 +1,7 @@
 #pragma once
 
 const char* CUBE_VERT_SHADER = R"(
-#version 450 core
+#version 300 es
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec2 aTexCoord;
 
@@ -20,7 +20,8 @@ void main() {
 )";
 
 const char* ROOM_FRAG_SHADER = R"(
-#version 450 core
+#version 300 es
+precision mediump float;
 out vec4 FragColor;
 in vec2 TexCoord;
 in vec3 FragPos;
@@ -33,7 +34,8 @@ void main() {
 )";
 
 const char* VOID_FRAG_SHADER = R"(
-#version 450 core
+#version 300 es
+precision mediump float;
 out vec4 FragColor;
 in vec3 FragPos;
 

@@ -31,8 +31,31 @@ void VRRenderer::initialise() {
 }
 
 void VRRenderer::renderEye(GLuint swapchainImage, GLuint gdTexture, const glm::mat4& view, const glm::mat4& proj) {
+    // swapBuffers is inside Geometry Dash's GL context. Do not leak the VR
+    // FBO, viewport, shader, VAO, or bound texture back into its next frame.
+    GLint previousFBO = 0;
+    GLint previousViewport[4]{};
+    GLint previousProgram = 0;
+    GLint previousVAO = 0;
+    GLint previousActiveTexture = 0;
+    GLint previousTexture = 0;
+    GLfloat previousClearColor[4]{};
+
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFBO);
+    glGetIntegerv(GL_VIEWPORT, previousViewport);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVAO);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &previousActiveTexture);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, previousClearColor);
+
     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, swapchainImage, 0);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        log::error("VRRenderer: OpenXR swapchain framebuffer is incomplete");
+    }
+
     glViewport(0, 0, 2048, 2048);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -43,7 +66,20 @@ void VRRenderer::renderEye(GLuint swapchainImage, GLuint gdTexture, const glm::m
     glBindVertexArray(m_screenVAO);
     glBindTexture(GL_TEXTURE_2D, gdTexture);
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    glBindTexture(GL_TEXTURE_2D, previousTexture);
+    glActiveTexture(previousActiveTexture);
+    glBindVertexArray(previousVAO);
+    glUseProgram(previousProgram);
+    glClearColor(
+        previousClearColor[0], previousClearColor[1],
+        previousClearColor[2], previousClearColor[3]
+    );
+    glViewport(
+        previousViewport[0], previousViewport[1],
+        previousViewport[2], previousViewport[3]
+    );
+    glBindFramebuffer(GL_FRAMEBUFFER, previousFBO);
 }
 
 void VRRenderer::drawToScreen(GLuint gdTexture) {
