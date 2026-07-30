@@ -54,8 +54,27 @@ class $modify(MyMenuLayer, MenuLayer) {
 #ifdef GEODE_IS_ANDROID
         // The VR activity runs in a separate Activity so we don't break the original
         // GLSurfaceView rendering path. Tell the launcher to start the Intent.
-        JNIEnv* env = geode::cocos::JniHelper::getEnv();
-        jobject activity = geode::cocos::JniHelper::getActivity();
+        JNIEnv* env = nullptr;
+        JavaVM* vm = cocos2d::JniHelper::getJavaVM();
+        if (vm) {
+            vm->GetEnv((void**)&env, JNI_VERSION_1_6);
+            if (!env) {
+                vm->AttachCurrentThread(&env, nullptr);
+            }
+        }
+        
+        jobject activity = nullptr;
+        if (env) {
+            jclass cocosActivityClass = env->FindClass("org/cocos2dx/lib/Cocos2dxActivity");
+            if (cocosActivityClass) {
+                jmethodID getContext = env->GetStaticMethodID(cocosActivityClass, "getContext", "()Landroid/content/Context;");
+                if (getContext) {
+                    activity = env->CallStaticObjectMethod(cocosActivityClass, getContext);
+                }
+                env->DeleteLocalRef(cocosActivityClass);
+            }
+        }
+        
         if (env && activity) {
             jclass activityClass = env->GetObjectClass(activity);
             jmethodID launchQuestVRMode = env->GetMethodID(activityClass, "launchQuestVRMode", "()V");
@@ -68,6 +87,7 @@ class $modify(MyMenuLayer, MenuLayer) {
                 log::error("Could not find launchQuestVRMode on the current Activity. Is the launcher updated?");
             }
             env->DeleteLocalRef(activityClass);
+            env->DeleteLocalRef(activity);
         } else {
             log::error("Could not get JNIEnv or Activity to launch VR Intent.");
         }
