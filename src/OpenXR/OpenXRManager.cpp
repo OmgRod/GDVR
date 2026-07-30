@@ -45,9 +45,8 @@ bool OpenXRManager::initialise() {
 
     // Geode 5.8.2 exposes getJavaVM(), but not JniHelper::getActivity().
     // Cocos2dxHelper keeps the real Activity in a static field after startup.
-    // An Application object is not sufficient for
-    // XrInstanceCreateInfoAndroidKHR::applicationActivity.
     jobject activity = nullptr;
+    bool hasActivity = false;
 
     // Older Cocos2d-x builds keep the activity in this field.
     jclass helperClass = env->FindClass("org/cocos2dx/lib/Cocos2dxHelper");
@@ -82,24 +81,48 @@ bool OpenXRManager::initialise() {
         }
     }
 
+    if (activity) {
+        jclass androidActivityClass = env->FindClass("android/app/Activity");
+        hasActivity = androidActivityClass && env->IsInstanceOf(activity, androidActivityClass);
+        if (androidActivityClass) env->DeleteLocalRef(androidActivityClass);
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        if (!hasActivity) {
+            env->DeleteLocalRef(activity);
+            activity = nullptr;
+        }
+    }
+
+    // Geometry Dash's bundled Cocos Java classes expose neither of the usual
+    // activity accessors above. The prior working path used the process
+    // application object; retain it as the final compatibility fallback.
     if (!activity) {
-        log::error("OpenXR: Could not obtain the live Cocos2dx Activity");
+        jclass activityThreadClass = env->FindClass("android/app/ActivityThread");
+        if (activityThreadClass && !env->ExceptionCheck()) {
+            jmethodID currentApplication = env->GetStaticMethodID(
+                activityThreadClass,
+                "currentApplication",
+                "()Landroid/app/Application;"
+            );
+            if (currentApplication && !env->ExceptionCheck()) {
+                activity = env->CallStaticObjectMethod(activityThreadClass, currentApplication);
+            }
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            env->DeleteLocalRef(activityThreadClass);
+        } else if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
+
+    if (!activity) {
+        log::error("OpenXR: Could not obtain an Android context");
         if (attached) vm->DetachCurrentThread();
         return false;
     }
 
-    jclass androidActivityClass = env->FindClass("android/app/Activity");
-    const bool isActivity = androidActivityClass && env->IsInstanceOf(activity, androidActivityClass);
-    if (androidActivityClass) env->DeleteLocalRef(androidActivityClass);
-    if (env->ExceptionCheck()) env->ExceptionClear();
-    if (!isActivity) {
-        log::error("OpenXR: Cocos context is not an android.app.Activity");
-        env->DeleteLocalRef(activity);
-        if (attached) vm->DetachCurrentThread();
-        return false;
-    }
-
-    log::info("OpenXR: Android Activity acquired");
+    log::info(
+        hasActivity ? "OpenXR: Android Activity acquired"
+                    : "OpenXR: Using Android application context fallback"
+    );
 
 
     PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
