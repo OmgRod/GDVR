@@ -36,7 +36,6 @@ void VRRenderer::renderEye(GLuint swapchainImage, GLuint gdTexture, const glm::m
     GLint previousFBO = 0;
     GLint previousViewport[4]{};
     GLint previousProgram = 0;
-    GLint previousVAO = 0;
     GLint previousActiveTexture = 0;
     GLint previousTexture = 0;
     GLfloat previousClearColor[4]{};
@@ -44,7 +43,6 @@ void VRRenderer::renderEye(GLuint swapchainImage, GLuint gdTexture, const glm::m
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFBO);
     glGetIntegerv(GL_VIEWPORT, previousViewport);
     glGetIntegerv(GL_CURRENT_PROGRAM, &previousProgram);
-    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previousVAO);
     glGetIntegerv(GL_ACTIVE_TEXTURE, &previousActiveTexture);
     glActiveTexture(GL_TEXTURE0);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTexture);
@@ -52,10 +50,6 @@ void VRRenderer::renderEye(GLuint swapchainImage, GLuint gdTexture, const glm::m
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, swapchainImage, 0);
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-        log::error("VRRenderer: OpenXR swapchain framebuffer is incomplete");
-    }
-
     glViewport(0, 0, 2048, 2048);
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -69,7 +63,7 @@ void VRRenderer::renderEye(GLuint swapchainImage, GLuint gdTexture, const glm::m
 
     glBindTexture(GL_TEXTURE_2D, previousTexture);
     glActiveTexture(previousActiveTexture);
-    glBindVertexArray(previousVAO);
+    glBindVertexArray(0);
     glUseProgram(previousProgram);
     glClearColor(
         previousClearColor[0], previousClearColor[1],
