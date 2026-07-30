@@ -39,7 +39,6 @@ bool VRManager::init() {
     m_renderer.initialise();
 
     m_initialised = true;
-    m_enabled = true;
     log::info("VR initialised: {}x{}", m_width, m_height);
     return true;
 }
@@ -49,21 +48,61 @@ bool VRManager::isEnabled() const {
 }
 
 void VRManager::startVR() {
+
     if (m_enabled) {
-        log::info("VRManager::startVR: already enabled");
+        log::info(
+            "VRManager: VR already enabled"
+        );
         return;
     }
-    log::info("VRManager::startVR: user requested VR — initialising...");
-    if (!init()) {
-        log::error("VRManager::startVR: init() failed, VR will not start");
+
+    if (m_initialising) {
+        log::info(
+            "VRManager: VR is already starting"
+        );
+        return;
     }
+
+    log::info(
+        "VRManager: User requested VR, initialising..."
+    );
+
+    m_initialising = true;
+    m_enabled = true;
+
+    if (!init()) {
+
+        log::error(
+            "VRManager: Failed starting VR"
+        );
+
+        m_enabled = false;
+        m_initialising = false;
+
+        return;
+    }
+
+    log::info(
+        "VRManager: OpenXR created, waiting for READY state..."
+    );
 }
 
 void VRManager::update() {
-    if (!m_initialised) return;
+    if (!m_initialised || !m_enabled) return;
 
-    // Process OpenXR event state machine transitions (IDLE -> READY -> RUNNING)
-    m_openXR.pollEvents();
+    // This must run even while waiting for READY. xrWaitFrame/xrBeginFrame are
+    // illegal until xrBeginSession has succeeded.
+    m_openXR.pollEvents(m_enabled);
+    m_running = m_openXR.isRunning();
+    m_initialising = !m_running && m_enabled;
+
+    if (m_openXR.exitRequested()) {
+        log::info("VRManager: OpenXR requested exit/loss; shutting down VR");
+        shutdown();
+        return;
+    }
+
+    if (!m_running) return;
 
     captureGDFrame();
 
@@ -71,7 +110,7 @@ void VRManager::update() {
     bool shouldRender = false;
     if (!m_openXR.waitFrame(&shouldRender, &displayTime)) return;
     
-    m_openXR.beginFrame();
+    if (!m_openXR.beginFrame()) return;
     
     if (shouldRender) {
         // Retrieve eye tracking data from reference space
@@ -93,9 +132,43 @@ void VRManager::update() {
 }
 
 void VRManager::captureGDFrame() {
-    glBindTexture(GL_TEXTURE_2D, m_gdTexture);
-    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_width, m_height);
-    glBindTexture(GL_TEXTURE_2D, 0);
+
+    GLint oldFBO = 0;
+
+    glGetIntegerv(
+        GL_FRAMEBUFFER_BINDING,
+        &oldFBO
+    );
+
+
+    glBindTexture(
+        GL_TEXTURE_2D,
+        m_gdTexture
+    );
+
+
+    glCopyTexSubImage2D(
+        GL_TEXTURE_2D,
+        0,
+        0,
+        0,
+        0,
+        0,
+        m_width,
+        m_height
+    );
+
+
+    glBindTexture(
+        GL_TEXTURE_2D,
+        0
+    );
+
+
+    glBindFramebuffer(
+        GL_FRAMEBUFFER,
+        oldFBO
+    );
 }
 
 bool VRManager::createGDTexture() {
@@ -113,7 +186,13 @@ GLuint VRManager::getGDTexture() const { return m_gdTexture; }
 void VRManager::shutdown() {
     m_openXR.shutdown();
     m_renderer.shutdown();
-    if (m_gdTexture) glDeleteTextures(1, &m_gdTexture);
+    if (m_gdTexture) {
+        glDeleteTextures(1, &m_gdTexture);
+        m_gdTexture = 0;
+    }
     m_initialised = false;
+    m_initialising = false;
+    m_initFailed = false;
     m_enabled = false;
+    m_running = false;
 }

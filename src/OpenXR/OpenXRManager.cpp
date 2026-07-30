@@ -12,151 +12,224 @@ using namespace geode::prelude;
 
 bool OpenXRManager::initialise() {
 #if defined(GEODE_IS_ANDROID)
-    // Get JNIEnv safely from the JavaVM
-    JavaVM* vm = cocos2d::JniHelper::getJavaVM();
-    JNIEnv* env = nullptr;
-    bool didAttach = false;
-    
-    jint envResult = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
-    if (envResult == JNI_EDETACHED) {
-        log::info("OpenXR: JNI thread not attached, attaching...");
-        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
-            log::error("OpenXR: Failed to attach JNI thread");
-            return false;
-        }
-        didAttach = true;
-    } else if (envResult != JNI_OK || env == nullptr) {
-        log::error("OpenXR: Failed to get JNIEnv, result: {}", (int)envResult);
-        return false;
-    }
-    log::info("OpenXR: JNIEnv acquired successfully");
-    
-    // Use android.app.ActivityThread.currentApplication() to get the app context.
-    // This is a standard Android API that works regardless of what Activity class
-    // the Geode launcher uses (unlike Cocos2dxActivity.getContext() which doesn't exist).
-    jobject appContext = nullptr;
-    jclass activityThreadClass = env->FindClass("android/app/ActivityThread");
-    if (activityThreadClass && !env->ExceptionCheck()) {
-        jmethodID currentAppMethod = env->GetStaticMethodID(activityThreadClass, "currentApplication", "()Landroid/app/Application;");
-        if (currentAppMethod && !env->ExceptionCheck()) {
-            appContext = env->CallStaticObjectMethod(activityThreadClass, currentAppMethod);
-            if (env->ExceptionCheck()) {
-                env->ExceptionClear();
-                appContext = nullptr;
-                log::error("OpenXR: Exception calling ActivityThread.currentApplication()");
-            } else if (appContext != nullptr) {
-                log::info("OpenXR: Got Android Application context via ActivityThread");
-            } else {
-                log::error("OpenXR: ActivityThread.currentApplication() returned null");
-            }
-        } else {
-            env->ExceptionClear();
-            log::error("OpenXR: Could not find currentApplication method");
-        }
-        env->DeleteLocalRef(activityThreadClass);
-    } else {
-        if (env->ExceptionCheck()) env->ExceptionClear();
-        log::error("OpenXR: Could not find ActivityThread class");
-    }
-    
-    if (appContext == nullptr) {
-        log::error("OpenXR: No Android context available, cannot initialize OpenXR");
-        if (didAttach) vm->DetachCurrentThread();
-        return false;
-    }
-    
-    // Initialize the OpenXR loader with the Android context
-    PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
-    if (XR_SUCCEEDED(xrGetInstanceProcAddr(XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction*)(&initializeLoader)))) {
-        log::info("OpenXR: Found xrInitializeLoaderKHR");
-        XrLoaderInitInfoAndroidKHR loaderInitInfoAndroid = {XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR};
-        loaderInitInfoAndroid.applicationVM = vm;
-        loaderInitInfoAndroid.applicationContext = appContext;
-        
-        XrResult initRes = initializeLoader((const XrLoaderInitInfoBaseHeaderKHR*)&loaderInitInfoAndroid);
-        log::info("OpenXR: initializeLoader result: {}", (int)initRes);
-        if (XR_FAILED(initRes)) {
-            log::error("OpenXR: Loader initialization failed");
-            env->DeleteLocalRef(appContext);
-            if (didAttach) vm->DetachCurrentThread();
-            return false;
-        }
-    } else {
-        log::error("OpenXR: Failed to get xrInitializeLoaderKHR proc addr");
-        env->DeleteLocalRef(appContext);
-        if (didAttach) vm->DetachCurrentThread();
-        return false;
-    }
-#endif
 
-    const char* extensions[] = {
-        "XR_KHR_opengl_es_enable",
-#if defined(GEODE_IS_ANDROID)
-        "XR_KHR_android_create_instance"
-#endif
+    // initialise() is reached only from VRManager after an explicit button
+    // request. It creates a session, not a running session.
+    m_running = false;
+    m_exitRequested = false;
+
+    JavaVM* vm = cocos2d::JniHelper::getJavaVM();
+    if (!vm) {
+        log::error("OpenXR: No JavaVM");
+        return false;
+    }
+
+    JNIEnv* env = nullptr;
+    bool attached = false;
+
+    jint result = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+
+    if (result == JNI_EDETACHED) {
+        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+            log::error("OpenXR: Failed attaching JNI");
+            return false;
+        }
+        attached = true;
+    }
+
+    if (!env) {
+        log::error("OpenXR: Invalid JNIEnv");
+        return false;
+    }
+
+
+    // Get actual Activity
+    jobject activity = cocos2d::JniHelper::getActivity();
+
+    if (!activity) {
+        log::error("OpenXR: Failed getting Android Activity");
+        if (attached)
+            vm->DetachCurrentThread();
+        return false;
+    }
+
+    log::info("OpenXR: Android Activity acquired");
+
+
+    PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
+
+    XrResult loaderResult =
+        xrGetInstanceProcAddr(
+            XR_NULL_HANDLE,
+            "xrInitializeLoaderKHR",
+            reinterpret_cast<PFN_xrVoidFunction*>(&initializeLoader)
+        );
+
+
+    if (XR_FAILED(loaderResult) || !initializeLoader) {
+        log::error("OpenXR: Missing xrInitializeLoaderKHR");
+        return false;
+    }
+
+
+    XrLoaderInitInfoAndroidKHR loaderInfo{
+        XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR
     };
 
-    XrInstanceCreateInfo createInfo{XR_TYPE_INSTANCE_CREATE_INFO};
-    
-#if defined(GEODE_IS_ANDROID)
-    XrInstanceCreateInfoAndroidKHR androidCreateInfo{XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
-    androidCreateInfo.applicationVM = vm;
-    androidCreateInfo.applicationActivity = appContext;
-    
-    createInfo.next = &androidCreateInfo;
-#endif
+    loaderInfo.applicationVM = vm;
+    loaderInfo.applicationContext = activity;
 
-    strcpy(createInfo.applicationInfo.applicationName, "Geometry Dash VR");
-    createInfo.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
-    createInfo.enabledExtensionCount = sizeof(extensions) / sizeof(extensions[0]);
-    createInfo.enabledExtensionNames = extensions;
 
-    XrResult res = xrCreateInstance(&createInfo, &m_instance);
-    
-#if defined(GEODE_IS_ANDROID)
-    // Clean up JNI references now that xrCreateInstance has consumed them
-    env->DeleteLocalRef(appContext);
-    if (didAttach) vm->DetachCurrentThread();
-#endif
-    
+    XrResult initResult =
+        initializeLoader(
+            reinterpret_cast<const XrLoaderInitInfoBaseHeaderKHR*>(&loaderInfo)
+        );
+
+
+    log::info(
+        "OpenXR: Loader init result {}",
+        (int)initResult
+    );
+
+
+    if (XR_FAILED(initResult)) {
+        log::error("OpenXR: Loader failed");
+        return false;
+    }
+
+
+    const char* extensions[] = {
+        XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
+        XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME
+    };
+
+
+    XrInstanceCreateInfo createInfo{
+        XR_TYPE_INSTANCE_CREATE_INFO
+    };
+
+
+    XrInstanceCreateInfoAndroidKHR androidInfo{
+        XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR
+    };
+
+
+    androidInfo.applicationVM = vm;
+    androidInfo.applicationActivity = activity;
+
+
+    createInfo.next = &androidInfo;
+
+    strcpy(
+        createInfo.applicationInfo.applicationName,
+        "Geometry Dash VR"
+    );
+
+    createInfo.applicationInfo.apiVersion =
+        XR_CURRENT_API_VERSION;
+
+
+    createInfo.enabledExtensionCount =
+        sizeof(extensions) / sizeof(char*);
+
+    createInfo.enabledExtensionNames =
+        extensions;
+
+
+
+    XrResult res =
+        xrCreateInstance(
+            &createInfo,
+            &m_instance
+        );
+
+
+    if (attached)
+        vm->DetachCurrentThread();
+
+
     if (XR_FAILED(res)) {
-        log::error("OpenXR: Failed to create instance, result code: {}", (int)res);
-        return false;
-    }
-    log::info("OpenXR: Instance created successfully");
-
-    XrSystemGetInfo systemInfo{XR_TYPE_SYSTEM_GET_INFO};
-    systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
-    if (XR_FAILED(xrGetSystem(m_instance, &systemInfo, &m_systemId))) {
-        log::error("OpenXR: Failed to get system");
-        return false;
-    }
-    log::info("OpenXR: System retrieved successfully (ID: {})", m_systemId);
-
-    log::info("OpenXR: Creating session...");
-    if (!createSession()) {
-        log::error("OpenXR: Failed to create session");
-        return false;
-    }
-    
-    log::info("OpenXR: Creating swapchain...");
-    if (!createSwapchain()) {
-        log::error("OpenXR: Failed to create swapchain");
+        log::error(
+            "OpenXR: xrCreateInstance failed {}",
+            (int)res
+        );
         return false;
     }
 
-    // Create reference space for tracking
-    XrReferenceSpaceCreateInfo spaceCreateInfo{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
-    spaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
-    spaceCreateInfo.poseInReferenceSpace = {{0,0,0,1}, {0,0,0}};
-    XrResult spaceRes = xrCreateReferenceSpace(m_session, &spaceCreateInfo, &m_localSpace);
-    if (XR_FAILED(spaceRes)) {
-        log::error("OpenXR: Failed to create reference space, error code: {}", (int)spaceRes);
+
+    log::info("OpenXR: Instance created");
+
+
+    XrSystemGetInfo systemInfo{
+        XR_TYPE_SYSTEM_GET_INFO
+    };
+
+    systemInfo.formFactor =
+        XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+
+
+    res =
+        xrGetSystem(
+            m_instance,
+            &systemInfo,
+            &m_systemId
+        );
+
+
+    if (XR_FAILED(res)) {
+        log::error("OpenXR: xrGetSystem failed");
         return false;
     }
 
-    m_running = true;
+
+    if (!createSession())
+        return false;
+
+
+    if (!createSwapchain())
+        return false;
+
+
+
+    XrReferenceSpaceCreateInfo spaceInfo{
+        XR_TYPE_REFERENCE_SPACE_CREATE_INFO
+    };
+
+
+    spaceInfo.referenceSpaceType =
+        XR_REFERENCE_SPACE_TYPE_LOCAL;
+
+
+    spaceInfo.poseInReferenceSpace.orientation.w = 1;
+
+
+    res =
+        xrCreateReferenceSpace(
+            m_session,
+            &spaceInfo,
+            &m_localSpace
+        );
+
+
+    if (XR_FAILED(res)) {
+        log::error("OpenXR: Failed creating space");
+        return false;
+    }
+
+
+    log::info(
+        "OpenXR: Initialised successfully"
+    );
+
+
     return true;
+
+
+#else
+
+    return false;
+
+#endif
 }
 
 bool OpenXRManager::createSession() {
@@ -241,7 +314,8 @@ bool OpenXRManager::createSwapchain() {
         
         uint32_t imageCount;
         xrEnumerateSwapchainImages(m_eyes[i].swapchain, 0, &imageCount, nullptr);
-        m_eyes[i].images.resize(imageCount);
+        m_eyes[i].images.clear();
+        m_eyes[i].images.reserve(imageCount);
         
         std::vector<XrSwapchainImageOpenGLESKHR> images(imageCount, {XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR});
         xrEnumerateSwapchainImages(m_eyes[i].swapchain, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)images.data());
@@ -252,7 +326,7 @@ bool OpenXRManager::createSwapchain() {
 }
 
 bool OpenXRManager::waitFrame(bool* shouldRender, XrTime* displayTime) {
-    if (!m_sessionActive) return false;
+    if (!m_running) return false;
 
     XrFrameWaitInfo info{XR_TYPE_FRAME_WAIT_INFO};
     XrFrameState state{XR_TYPE_FRAME_STATE};
@@ -263,9 +337,14 @@ bool OpenXRManager::waitFrame(bool* shouldRender, XrTime* displayTime) {
     return true;
 }
 
-void OpenXRManager::beginFrame() {
+bool OpenXRManager::beginFrame() {
     XrFrameBeginInfo info{XR_TYPE_FRAME_BEGIN_INFO};
-    xrBeginFrame(m_session, &info);
+    const XrResult result = xrBeginFrame(m_session, &info);
+    if (XR_FAILED(result)) {
+        log::error("OpenXR: xrBeginFrame failed: {}", static_cast<int>(result));
+        return false;
+    }
+    return true;
 }
 
 void OpenXRManager::locateViews() {
@@ -352,13 +431,32 @@ void OpenXRManager::submitEmptyFrame() {
 }
 
 void OpenXRManager::shutdown() {
-    if (m_localSpace != XR_NULL_HANDLE) xrDestroySpace(m_localSpace);
-    for (auto& eye : m_eyes) if (eye.swapchain != XR_NULL_HANDLE) xrDestroySwapchain(eye.swapchain);
-    if (m_session != XR_NULL_HANDLE) xrDestroySession(m_session);
-    if (m_instance != XR_NULL_HANDLE) xrDestroyInstance(m_instance);
+    if (m_localSpace != XR_NULL_HANDLE) {
+        xrDestroySpace(m_localSpace);
+        m_localSpace = XR_NULL_HANDLE;
+    }
+    for (auto& eye : m_eyes) {
+        if (eye.swapchain != XR_NULL_HANDLE) {
+            xrDestroySwapchain(eye.swapchain);
+            eye.swapchain = XR_NULL_HANDLE;
+        }
+    }
+    m_eyes.clear();
+    if (m_session != XR_NULL_HANDLE) {
+        xrDestroySession(m_session);
+        m_session = XR_NULL_HANDLE;
+    }
+    if (m_instance != XR_NULL_HANDLE) {
+        xrDestroyInstance(m_instance);
+        m_instance = XR_NULL_HANDLE;
+    }
+    m_systemId = XR_NULL_SYSTEM_ID;
+    m_predictedDisplayTime = 0;
+    m_running = false;
+    m_exitRequested = false;
 }
 
-void OpenXRManager::pollEvents() {
+void OpenXRManager::pollEvents(bool wantsRunning) {
     XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
     XrResult pollRes;
     
@@ -366,10 +464,10 @@ void OpenXRManager::pollEvents() {
         log::info("OpenXR: Received event type: {}", (int)event.type);
         
         if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
-            auto* sessionEvent = (XrEventDataSessionStateChanged*)&event;
+            const auto* sessionEvent = reinterpret_cast<const XrEventDataSessionStateChanged*>(&event);
             log::info("OpenXR: Session state changed to {}", (int)sessionEvent->state);
             
-            if (sessionEvent->state == XR_SESSION_STATE_READY) {
+            if (sessionEvent->state == XR_SESSION_STATE_READY && wantsRunning && !m_running) {
                 log::info("OpenXR: Session state READY, beginning session...");
                 XrSessionBeginInfo beginInfo{XR_TYPE_SESSION_BEGIN_INFO};
                 beginInfo.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -378,15 +476,27 @@ void OpenXRManager::pollEvents() {
                     log::error("OpenXR: Failed to begin session, error code: {}", (int)beginRes);
                 } else {
                     log::info("OpenXR: Session begun successfully");
-                    m_sessionActive = true;
+                    m_running = true;
                 }
+            } else if (sessionEvent->state == XR_SESSION_STATE_READY) {
+                log::info("OpenXR: READY received with VR disabled; not beginning session");
+            } else if (sessionEvent->state == XR_SESSION_STATE_VISIBLE) {
+                log::info("OpenXR: Session is visible");
+            } else if (sessionEvent->state == XR_SESSION_STATE_FOCUSED) {
+                log::info("OpenXR: Session is focused");
             } else if (sessionEvent->state == XR_SESSION_STATE_STOPPING) {
                 log::info("OpenXR: Session state STOPPING, ending session...");
-                xrEndSession(m_session);
-                m_sessionActive = false;
+                if (m_running) {
+                    XrResult endRes = xrEndSession(m_session);
+                    if (XR_FAILED(endRes)) {
+                        log::error("OpenXR: xrEndSession failed: {}", static_cast<int>(endRes));
+                    }
+                }
+                m_running = false;
             } else if (sessionEvent->state == XR_SESSION_STATE_EXITING || sessionEvent->state == XR_SESSION_STATE_LOSS_PENDING) {
                 log::info("OpenXR: Session exiting or loss pending");
-                m_sessionActive = false;
+                m_running = false;
+                m_exitRequested = true;
             }
         }
         event = {XR_TYPE_EVENT_DATA_BUFFER};
@@ -397,7 +507,7 @@ void OpenXRManager::pollEvents() {
     }
     
     static int frameCounter = 0;
-    if (!m_sessionActive) {
+    if (!m_running) {
         if (++frameCounter % 60 == 0) {
             log::info("OpenXR: Event loop pumping, waiting for session to become READY... (Currently not active)");
         }

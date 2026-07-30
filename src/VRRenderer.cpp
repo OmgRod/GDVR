@@ -31,27 +31,18 @@ void VRRenderer::initialise() {
 }
 
 void VRRenderer::renderEye(GLuint swapchainImage, GLuint gdTexture, const glm::mat4& view, const glm::mat4& proj) {
-    // Bind the swapchain image to our FBO
     glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, swapchainImage, 0);
-    
-    // Hardcoded viewport size based on our swapchain creation (2048x2048)
     glViewport(0, 0, 2048, 2048);
-    
-    // Clear the background (the "void")
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
     glUseProgram(m_roomShader);
     glUniformMatrix4fv(glGetUniformLocation(m_roomShader, "view"), 1, GL_FALSE, glm::value_ptr(view));
     glUniformMatrix4fv(glGetUniformLocation(m_roomShader, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
     glUniformMatrix4fv(glGetUniformLocation(m_roomShader, "model"), 1, GL_FALSE, glm::value_ptr(glm::mat4(1.0f)));
-    
     glBindVertexArray(m_screenVAO);
     glBindTexture(GL_TEXTURE_2D, gdTexture);
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    
-    // Unbind FBO
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 

@@ -23,9 +23,9 @@ class OpenXRManager {
 public:
     bool initialise();
     void shutdown();
-    void pollEvents();
+    void pollEvents(bool wantsRunning);
     bool waitFrame(bool* shouldRender, XrTime* displayTime);
-    void beginFrame();
+    bool beginFrame();
     void locateViews();
     GLuint acquireImage(const EyeData& eye);
     void releaseImage(const EyeData& eye);
@@ -33,6 +33,7 @@ public:
     void submitEmptyFrame();
     const std::vector<EyeData>& getEyes() const { return m_eyes; }
     bool isRunning() const { return m_running; }
+    bool exitRequested() const { return m_exitRequested; }
 
 private:
     bool createSession();
@@ -45,5 +46,5 @@ private:
     std::vector<EyeData> m_eyes;
     XrTime m_predictedDisplayTime = 0;
     bool m_running = false;
-    bool m_sessionActive = false;
+    bool m_exitRequested = false;
 };

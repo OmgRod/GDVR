@@ -30,6 +30,12 @@ private:
     int m_width = 0;
     int m_height = 0;
     bool m_initialised = false;
+    // A request is in flight: OpenXR objects exist, but xrBeginSession has not
+    // succeeded yet.
+    bool m_initialising = false;
     bool m_initFailed = false;
+    // The user's desired state. Keep pumping xrPollEvent while this is true.
     bool m_enabled = false;
+    // True only after the OpenXR runtime accepts xrBeginSession.
+    bool m_running = false;
 };
