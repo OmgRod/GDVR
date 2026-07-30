@@ -2,6 +2,9 @@
 #include <Geode/modify/CCEGLView.hpp>
 #include <Geode/modify/MenuLayer.hpp>
 #include "VRManager.hpp"
+#ifdef GEODE_IS_ANDROID
+#include <Geode/cocos/platform/android/jni/JniHelper.h>
+#endif
 
 using namespace geode::prelude;
 
@@ -49,9 +52,28 @@ class $modify(MyMenuLayer, MenuLayer) {
     void onToggleVR(CCObject* sender) {
         log::info("User clicked the Toggle VR button in MenuLayer!");
 #ifdef GEODE_IS_ANDROID
-        // We are already inside the correct activity, so there is no need to
-        // launch an Intent. Just tell VRManager to initialise OpenXR and start
-        // the render loop. The manifest category handles OpenXR runtime routing.
+        // The VR activity runs in a separate Activity so we don't break the original
+        // GLSurfaceView rendering path. Tell the launcher to start the Intent.
+        JNIEnv* env = geode::cocos::JniHelper::getEnv();
+        jobject activity = geode::cocos::JniHelper::getActivity();
+        if (env && activity) {
+            jclass activityClass = env->GetObjectClass(activity);
+            jmethodID launchQuestVRMode = env->GetMethodID(activityClass, "launchQuestVRMode", "()V");
+            
+            if (launchQuestVRMode && !env->ExceptionCheck()) {
+                log::info("Found launchQuestVRMode, calling it...");
+                env->CallVoidMethod(activity, launchQuestVRMode);
+            } else {
+                if (env->ExceptionCheck()) env->ExceptionClear();
+                log::error("Could not find launchQuestVRMode on the current Activity. Is the launcher updated?");
+            }
+            env->DeleteLocalRef(activityClass);
+        } else {
+            log::error("Could not get JNIEnv or Activity to launch VR Intent.");
+        }
+        
+        // This will put VRManager into a pending state where it will poll
+        // until the launcher bridge successfully provides the new VR Activity.
         VRManager::get().startVR();
 #else
         log::info("Toggle VR is only supported on Android (Meta Quest).");

@@ -63,32 +63,25 @@ void VRManager::startVR() {
         return;
     }
 
-    log::info(
-        "VRManager: User requested VR, initialising..."
-    );
+    log::info("VRManager: User requested VR, preparing...");
 
     m_initialising = true;
     m_enabled = true;
+    m_initFailed = false; // Reset just in case
 
-    if (!init()) {
-
-        log::error(
-            "VRManager: Failed starting VR"
-        );
-
-        m_enabled = false;
-        m_initialising = false;
-
-        return;
-    }
-
-    log::info(
-        "VRManager: OpenXR created, waiting for READY state..."
-    );
+    // We no longer call init() here because GeometryDashVRActivity takes time to
+    // launch asynchronously. We'll poll init() in update() instead.
 }
 
 void VRManager::update() {
-    if (!m_initialised || !m_enabled) return;
+    if (!m_enabled) return;
+
+    if (!m_initialised) {
+        if (!init()) {
+            // Keep retrying until GeometryDashVRActivity is ready.
+            return;
+        }
+    }
 
     // This must run even while waiting for READY. xrWaitFrame/xrBeginFrame are
     // illegal until xrBeginSession has succeeded.

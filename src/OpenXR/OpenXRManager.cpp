@@ -6,6 +6,7 @@
 #include <glm/gtx/quaternion.hpp>
 #if defined(GEODE_IS_ANDROID)
 #include <Geode/cocos/platform/android/jni/JniHelper.h>
+#include <dlfcn.h>
 #endif
 
 using namespace geode::prelude;
@@ -42,29 +43,42 @@ bool OpenXRManager::initialise() {
         return false;
     }
 
+    // ---------------------------------------------------------------------------
+    // Obtain the Android Activity context
+    // ---------------------------------------------------------------------------
+    //
+    // GeometryDashVRBridge.cpp (in liblauncherfix.so) exports a plain-C symbol
+    // geode_vr_getActivityContext() that returns the GeometryDashVRActivity
+    // instance stored during nativeOnCreate(). This is the correct Activity for
+    // OpenXR: the runtime uses it to attach to the Android lifecycle and to
+    // validate the application window.
+    //
+    // We resolve the symbol at runtime so the mod does not need to link against
+    // the launcher. RTLD_DEFAULT searches all already-loaded shared libraries,
+    // which includes liblauncherfix.so since the launcher loaded it before Geode.
 
-    // Geode 5.8.2 exposes getJavaVM(), but not JniHelper::getActivity().
-    // Cocos2dxHelper keeps the real Activity in a static field after startup.
+    using GetCtxFn = jobject (*)(JNIEnv*);
+    auto getCtxFn = reinterpret_cast<GetCtxFn>(
+        dlsym(RTLD_DEFAULT, "geode_vr_getActivityContext")
+    );
+
     jobject activity = nullptr;
-    bool hasActivity = false;
-
-    // Older Cocos2d-x builds keep the activity in this field.
-    jclass helperClass = env->FindClass("org/cocos2dx/lib/Cocos2dxHelper");
-    if (helperClass && !env->ExceptionCheck()) {
-        jfieldID activityField = env->GetStaticFieldID(
-            helperClass, "sActivity", "Landroid/app/Activity;"
-        );
-        if (activityField && !env->ExceptionCheck()) {
-            activity = env->GetStaticObjectField(helperClass, activityField);
+    if (getCtxFn) {
+        activity = getCtxFn(env);
+        if (activity) {
+            log::info("OpenXR: GeometryDashVRActivity obtained via launcher bridge");
+        } else {
+            log::warn("OpenXR: geode_vr_getActivityContext returned null — "
+                      "GeometryDashVRActivity may not have been created yet");
         }
-        if (env->ExceptionCheck()) env->ExceptionClear();
-        env->DeleteLocalRef(helperClass);
-    } else if (env->ExceptionCheck()) {
-        env->ExceptionClear();
+    } else {
+        log::warn("OpenXR: geode_vr_getActivityContext not found in liblauncherfix.so "
+                  "(launcher version mismatch?) — falling back to Cocos context");
     }
 
-    // Geometry Dash's Cocos build does not expose Cocos2dxHelper.sActivity.
-    // Its public getContext() returns the actual Cocos2dxActivity instance.
+    // Fallback: if the launcher bridge symbol is missing or returned null,
+    // try Cocos2dxActivity.getContext() as a last resort. This was the old
+    // approach and may return the wrong Activity class on some GD versions.
     if (!activity) {
         jclass activityClass = env->FindClass("org/cocos2dx/lib/Cocos2dxActivity");
         if (activityClass && !env->ExceptionCheck()) {
@@ -79,141 +93,8 @@ bool OpenXRManager::initialise() {
         } else if (env->ExceptionCheck()) {
             env->ExceptionClear();
         }
-    }
-
-    if (activity) {
-        jclass androidActivityClass = env->FindClass("android/app/Activity");
-        hasActivity = androidActivityClass && env->IsInstanceOf(activity, androidActivityClass);
-        if (androidActivityClass) env->DeleteLocalRef(androidActivityClass);
-        if (env->ExceptionCheck()) env->ExceptionClear();
-        if (!hasActivity) {
-            env->DeleteLocalRef(activity);
-            activity = nullptr;
-        }
-    }
-
-    // Geometry Dash's bundled Cocos Java classes expose neither of the usual
-    // activity accessors above. Obtain its currently-created Activity from
-    // ActivityThread before falling back to the process application object.
-    if (!activity) {
-        jclass activityThreadClass = env->FindClass("android/app/ActivityThread");
-        if (activityThreadClass && !env->ExceptionCheck()) {
-            jmethodID currentActivityThread = env->GetStaticMethodID(
-                activityThreadClass,
-                "currentActivityThread",
-                "()Landroid/app/ActivityThread;"
-            );
-            jobject activityThread = nullptr;
-            if (currentActivityThread && !env->ExceptionCheck()) {
-                activityThread = env->CallStaticObjectMethod(
-                    activityThreadClass, currentActivityThread
-                );
-            }
-            if (env->ExceptionCheck()) env->ExceptionClear();
-
-            // Use java.lang.reflect.Field so this continues to work whether
-            // mActivities is backed by ArrayMap or another Map implementation.
-            auto getPrivateField = [&](jobject object, const char* name) -> jobject {
-                if (!object) return nullptr;
-
-                jclass objectClass = env->GetObjectClass(object);
-                jclass classClass = env->FindClass("java/lang/Class");
-                jclass fieldClass = env->FindClass("java/lang/reflect/Field");
-                if (!objectClass || !classClass || !fieldClass || env->ExceptionCheck()) {
-                    if (env->ExceptionCheck()) env->ExceptionClear();
-                    if (objectClass) env->DeleteLocalRef(objectClass);
-                    if (classClass) env->DeleteLocalRef(classClass);
-                    if (fieldClass) env->DeleteLocalRef(fieldClass);
-                    return nullptr;
-                }
-
-                jmethodID getDeclaredField = env->GetMethodID(
-                    classClass, "getDeclaredField",
-                    "(Ljava/lang/String;)Ljava/lang/reflect/Field;"
-                );
-                jmethodID setAccessible = env->GetMethodID(fieldClass, "setAccessible", "(Z)V");
-                jmethodID get = env->GetMethodID(fieldClass, "get", "(Ljava/lang/Object;)Ljava/lang/Object;");
-                jstring fieldName = env->NewStringUTF(name);
-                jobject field = nullptr;
-                jobject value = nullptr;
-                if (getDeclaredField && setAccessible && get && fieldName && !env->ExceptionCheck()) {
-                    field = env->CallObjectMethod(objectClass, getDeclaredField, fieldName);
-                    if (field && !env->ExceptionCheck()) {
-                        env->CallVoidMethod(field, setAccessible, JNI_TRUE);
-                        if (!env->ExceptionCheck()) value = env->CallObjectMethod(field, get, object);
-                    }
-                }
-                if (env->ExceptionCheck()) env->ExceptionClear();
-                if (field) env->DeleteLocalRef(field);
-                if (fieldName) env->DeleteLocalRef(fieldName);
-                env->DeleteLocalRef(objectClass);
-                env->DeleteLocalRef(classClass);
-                env->DeleteLocalRef(fieldClass);
-                return value;
-            };
-
-            jobject activityMap = getPrivateField(activityThread, "mActivities");
-            if (activityMap) {
-                jclass mapClass = env->FindClass("java/util/Map");
-                jclass collectionClass = env->FindClass("java/util/Collection");
-                jclass iteratorClass = env->FindClass("java/util/Iterator");
-                jclass androidActivityClass = env->FindClass("android/app/Activity");
-                if (mapClass && collectionClass && iteratorClass && androidActivityClass &&
-                    env->IsInstanceOf(activityMap, mapClass)) {
-                    jmethodID values = env->GetMethodID(mapClass, "values", "()Ljava/util/Collection;");
-                    jmethodID iterator = env->GetMethodID(collectionClass, "iterator", "()Ljava/util/Iterator;");
-                    jmethodID hasNext = env->GetMethodID(iteratorClass, "hasNext", "()Z");
-                    jmethodID next = env->GetMethodID(iteratorClass, "next", "()Ljava/lang/Object;");
-                    if (values && iterator && hasNext && next && !env->ExceptionCheck()) {
-                        jobject records = env->CallObjectMethod(activityMap, values);
-                        jobject recordIterator = records ? env->CallObjectMethod(records, iterator) : nullptr;
-                        while (recordIterator && !env->ExceptionCheck() &&
-                               env->CallBooleanMethod(recordIterator, hasNext) == JNI_TRUE) {
-                            jobject record = env->CallObjectMethod(recordIterator, next);
-                            jobject candidate = getPrivateField(record, "activity");
-                            if (!candidate) candidate = getPrivateField(record, "mActivity");
-                            if (candidate && env->IsInstanceOf(candidate, androidActivityClass)) {
-                                activity = candidate;
-                                hasActivity = true;
-                                if (record) env->DeleteLocalRef(record);
-                                break;
-                            }
-                            if (candidate) env->DeleteLocalRef(candidate);
-                            if (record) env->DeleteLocalRef(record);
-                        }
-                        if (env->ExceptionCheck()) env->ExceptionClear();
-                        if (recordIterator) env->DeleteLocalRef(recordIterator);
-                        if (records) env->DeleteLocalRef(records);
-                    } else if (env->ExceptionCheck()) {
-                        env->ExceptionClear();
-                    }
-                } else if (env->ExceptionCheck()) {
-                    env->ExceptionClear();
-                }
-                if (mapClass) env->DeleteLocalRef(mapClass);
-                if (collectionClass) env->DeleteLocalRef(collectionClass);
-                if (iteratorClass) env->DeleteLocalRef(iteratorClass);
-                if (androidActivityClass) env->DeleteLocalRef(androidActivityClass);
-                env->DeleteLocalRef(activityMap);
-            }
-            if (activityThread) env->DeleteLocalRef(activityThread);
-
-            // Preserve the old, working initialization path if no Activity
-            // record was available on this Android version.
-            if (!activity) {
-                jmethodID currentApplication = env->GetStaticMethodID(
-                    activityThreadClass,
-                    "currentApplication",
-                    "()Landroid/app/Application;"
-                );
-                if (currentApplication && !env->ExceptionCheck()) {
-                    activity = env->CallStaticObjectMethod(activityThreadClass, currentApplication);
-                }
-                if (env->ExceptionCheck()) env->ExceptionClear();
-            }
-            env->DeleteLocalRef(activityThreadClass);
-        } else if (env->ExceptionCheck()) {
-            env->ExceptionClear();
+        if (activity) {
+            log::info("OpenXR: Using Cocos2dxActivity.getContext() fallback");
         }
     }
 
@@ -222,13 +103,7 @@ bool OpenXRManager::initialise() {
         if (attached) vm->DetachCurrentThread();
         return false;
     }
-
-    if (hasActivity) {
-        log::info("OpenXR: Android Activity acquired");
-    } else {
-        log::info("OpenXR: Using Android application context fallback");
-    }
-
+    log::info("OpenXR: Android context acquired");
 
     PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
 
@@ -239,12 +114,11 @@ bool OpenXRManager::initialise() {
             reinterpret_cast<PFN_xrVoidFunction*>(&initializeLoader)
         );
 
-
     if (XR_FAILED(loaderResult) || !initializeLoader) {
         log::error("OpenXR: Missing xrInitializeLoaderKHR");
+        if (attached) vm->DetachCurrentThread();
         return false;
     }
-
 
     XrLoaderInitInfoAndroidKHR loaderInfo{
         XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR
@@ -253,18 +127,15 @@ bool OpenXRManager::initialise() {
     loaderInfo.applicationVM = vm;
     loaderInfo.applicationContext = activity;
 
-
     XrResult initResult =
         initializeLoader(
             reinterpret_cast<const XrLoaderInitInfoBaseHeaderKHR*>(&loaderInfo)
         );
 
-
     log::info(
         "OpenXR: Loader init result {}",
         (int)initResult
     );
-
 
     if (XR_FAILED(initResult)) {
         log::error("OpenXR: Loader failed");
