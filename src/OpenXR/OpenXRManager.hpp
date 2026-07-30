@@ -24,12 +24,13 @@ public:
     bool initialise();
     void shutdown();
     void pollEvents();
-    bool waitFrame(XrTime* displayTime);
+    bool waitFrame(bool* shouldRender, XrTime* displayTime);
     void beginFrame();
     void locateViews();
     GLuint acquireImage(const EyeData& eye);
     void releaseImage(const EyeData& eye);
     void submitFrame(const std::vector<EyeData>& eyes);
+    void submitEmptyFrame();
     const std::vector<EyeData>& getEyes() const { return m_eyes; }
     bool isRunning() const { return m_running; }
 

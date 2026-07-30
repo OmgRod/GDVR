@@ -52,23 +52,28 @@ void VRManager::update() {
     captureGDFrame();
 
     XrTime displayTime;
-    if (!m_openXR.waitFrame(&displayTime)) return;
+    bool shouldRender = false;
+    if (!m_openXR.waitFrame(&shouldRender, &displayTime)) return;
     
     m_openXR.beginFrame();
     
-    // Retrieve eye tracking data from reference space
-    m_openXR.locateViews();
-    
-    auto& eyes = m_openXR.getEyes();
-    for (const auto& eye : eyes) {
-        GLuint image = m_openXR.acquireImage(eye);
+    if (shouldRender) {
+        // Retrieve eye tracking data from reference space
+        m_openXR.locateViews();
         
-        m_renderer.renderEye(m_gdTexture, eye.viewMatrix, eye.projection);
+        auto& eyes = m_openXR.getEyes();
+        for (const auto& eye : eyes) {
+            GLuint image = m_openXR.acquireImage(eye);
+            
+            m_renderer.renderEye(image, m_gdTexture, eye.viewMatrix, eye.projection);
+            
+            m_openXR.releaseImage(eye);
+        }
         
-        m_openXR.releaseImage(eye);
+        m_openXR.submitFrame(eyes);
+    } else {
+        m_openXR.submitEmptyFrame();
     }
-    
-    m_openXR.submitFrame(eyes);
 }
 
 void VRManager::captureGDFrame() {

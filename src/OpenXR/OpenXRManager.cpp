@@ -251,7 +251,7 @@ bool OpenXRManager::createSwapchain() {
     return true;
 }
 
-bool OpenXRManager::waitFrame(XrTime* displayTime) {
+bool OpenXRManager::waitFrame(bool* shouldRender, XrTime* displayTime) {
     if (!m_sessionActive) return false;
 
     XrFrameWaitInfo info{XR_TYPE_FRAME_WAIT_INFO};
@@ -259,6 +259,7 @@ bool OpenXRManager::waitFrame(XrTime* displayTime) {
     if (XR_FAILED(xrWaitFrame(m_session, &info, &state))) return false;
     m_predictedDisplayTime = state.predictedDisplayTime;
     *displayTime = m_predictedDisplayTime;
+    *shouldRender = (state.shouldRender == XR_TRUE);
     return true;
 }
 
@@ -336,6 +337,16 @@ void OpenXRManager::submitFrame(const std::vector<EyeData>& eyes) {
     endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     endInfo.layerCount = 1;
     endInfo.layers = layers;
+
+    xrEndFrame(m_session, &endInfo);
+}
+
+void OpenXRManager::submitEmptyFrame() {
+    XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
+    endInfo.displayTime = m_predictedDisplayTime;
+    endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    endInfo.layerCount = 0;
+    endInfo.layers = nullptr;
 
     xrEndFrame(m_session, &endInfo);
 }
