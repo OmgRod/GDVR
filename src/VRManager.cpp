@@ -39,8 +39,24 @@ bool VRManager::init() {
     m_renderer.initialise();
 
     m_initialised = true;
+    m_enabled = true;
     log::info("VR initialised: {}x{}", m_width, m_height);
     return true;
+}
+
+bool VRManager::isEnabled() const {
+    return m_enabled;
+}
+
+void VRManager::startVR() {
+    if (m_enabled) {
+        log::info("VRManager::startVR: already enabled");
+        return;
+    }
+    log::info("VRManager::startVR: user requested VR — initialising...");
+    if (!init()) {
+        log::error("VRManager::startVR: init() failed, VR will not start");
+    }
 }
 
 void VRManager::update() {
@@ -99,4 +115,5 @@ void VRManager::shutdown() {
     m_renderer.shutdown();
     if (m_gdTexture) glDeleteTextures(1, &m_gdTexture);
     m_initialised = false;
+    m_enabled = false;
 }

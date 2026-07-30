@@ -3,27 +3,18 @@
 #include <Geode/modify/MenuLayer.hpp>
 #include "VRManager.hpp"
 
-#ifdef GEODE_IS_ANDROID
-#include <Geode/cocos/platform/android/jni/JniHelper.h>
-#endif
-
 using namespace geode::prelude;
 
 class $modify(MyEGLView, CCEGLView) {
     void swapBuffers() {
-        static bool firstFrame = true;
-        if (firstFrame) {
-            log::info("VRManager: First frame swapBuffers called");
-            firstFrame = false;
+        // Only run the OpenXR render loop after the user has explicitly
+        // enabled VR via the button. This avoids initialising OpenXR before
+        // the Android activity lifecycle is ready.
+        if (VRManager::get().isEnabled()) {
+            VRManager::get().update();
         }
 
-        // Initialize VRManager lazily on the first frame
-        VRManager::get().init();
-
-        // Run VR rendering before swapping buffers
-        VRManager::get().update();
-        
-        // Call the original swapBuffers to show the flat mirror
+        // Always call the original so the flat Cocos2d view keeps rendering.
         CCEGLView::swapBuffers();
     }
 };
@@ -58,48 +49,10 @@ class $modify(MyMenuLayer, MenuLayer) {
     void onToggleVR(CCObject* sender) {
         log::info("User clicked the Toggle VR button in MenuLayer!");
 #ifdef GEODE_IS_ANDROID
-        log::info("Attempting JNI transition to IMMERSIVE_HMD...");
-        cocos2d::JniMethodInfo methodInfo;
-        // 1. Get the Activity (Context) from Cocos2dxActivity
-        if (cocos2d::JniHelper::getStaticMethodInfo(methodInfo, "org/cocos2dx/lib/Cocos2dxActivity", "getContext", "()Landroid/content/Context;")) {
-            jobject activityObj = methodInfo.env->CallStaticObjectMethod(methodInfo.classID, methodInfo.methodID);
-            methodInfo.env->DeleteLocalRef(methodInfo.classID);
-            
-            if (activityObj) {
-                // Intent intent = new Intent(activityObj, activityObj.getClass());
-                jclass intentClass = methodInfo.env->FindClass("android/content/Intent");
-                jmethodID intentConstructor = methodInfo.env->GetMethodID(intentClass, "<init>", "(Landroid/content/Context;Ljava/lang/Class;)V");
-                jclass activityClass = methodInfo.env->GetObjectClass(activityObj);
-                
-                jobject intentObj = methodInfo.env->NewObject(intentClass, intentConstructor, activityObj, activityClass);
-                
-                // intent.addCategory("org.khronos.openxr.intent.category.IMMERSIVE_HMD");
-                jmethodID addCategoryMethod = methodInfo.env->GetMethodID(intentClass, "addCategory", "(Ljava/lang/String;)Landroid/content/Intent;");
-                jstring categoryStr = methodInfo.env->NewStringUTF("org.khronos.openxr.intent.category.IMMERSIVE_HMD");
-                methodInfo.env->CallObjectMethod(intentObj, addCategoryMethod, categoryStr);
-                
-                // intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP); // 0x20000000
-                jmethodID addFlagsMethod = methodInfo.env->GetMethodID(intentClass, "addFlags", "(I)Landroid/content/Intent;");
-                methodInfo.env->CallObjectMethod(intentObj, addFlagsMethod, 0x20000000);
-                
-                // activityObj.startActivity(intent);
-                jmethodID startActivityMethod = methodInfo.env->GetMethodID(activityClass, "startActivity", "(Landroid/content/Intent;)V");
-                methodInfo.env->CallVoidMethod(activityObj, startActivityMethod, intentObj);
-                
-                // Clean up local references
-                methodInfo.env->DeleteLocalRef(intentObj);
-                methodInfo.env->DeleteLocalRef(categoryStr);
-                methodInfo.env->DeleteLocalRef(activityClass);
-                methodInfo.env->DeleteLocalRef(intentClass);
-                methodInfo.env->DeleteLocalRef(activityObj);
-                
-                log::info("Successfully fired Intent to transition to IMMERSIVE_HMD");
-            } else {
-                log::error("getContext() returned null.");
-            }
-        } else {
-            log::error("Failed to find getContext() on Cocos2dxActivity.");
-        }
+        // We are already inside the correct activity, so there is no need to
+        // launch an Intent. Just tell VRManager to initialise OpenXR and start
+        // the render loop. The manifest category handles OpenXR runtime routing.
+        VRManager::get().startVR();
 #else
         log::info("Toggle VR is only supported on Android (Meta Quest).");
 #endif

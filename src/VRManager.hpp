@@ -11,6 +11,8 @@ public:
     void update();
     void shutdown();
     GLuint getGDTexture() const;
+    bool isEnabled() const;
+    void startVR();
 
 private:
     VRManager() = default;
@@ -29,4 +31,5 @@ private:
     int m_height = 0;
     bool m_initialised = false;
     bool m_initFailed = false;
+    bool m_enabled = false;
 };
