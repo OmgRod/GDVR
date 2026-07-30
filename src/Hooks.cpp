@@ -65,13 +65,44 @@ class $modify(MyMenuLayer, MenuLayer) {
         
         jobject activity = nullptr;
         if (env) {
-            jclass cocosActivityClass = env->FindClass("org/cocos2dx/lib/Cocos2dxActivity");
-            if (cocosActivityClass) {
-                jmethodID getContext = env->GetStaticMethodID(cocosActivityClass, "getContext", "()Landroid/content/Context;");
-                if (getContext) {
-                    activity = env->CallStaticObjectMethod(cocosActivityClass, getContext);
+            jclass cocosHelperClass = env->FindClass("org/cocos2dx/lib/Cocos2dxHelper");
+            if (cocosHelperClass) {
+                jmethodID getActivity = env->GetStaticMethodID(cocosHelperClass, "getActivity", "()Landroid/app/Activity;");
+                if (getActivity) {
+                    activity = env->CallStaticObjectMethod(cocosHelperClass, getActivity);
                 }
-                env->DeleteLocalRef(cocosActivityClass);
+                env->DeleteLocalRef(cocosHelperClass);
+            }
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+            
+            // Fallback for Geode launcher using BaseRobTopActivity
+            if (!activity) {
+                jclass rtopActivityClass = env->FindClass("com/customRobTop/BaseRobTopActivity");
+                if (rtopActivityClass) {
+                    jmethodID getMe = env->GetStaticMethodID(
+                        rtopActivityClass,
+                        "getMe",
+                        "()Ljava/lang/ref/WeakReference;"
+                    );
+                    if (getMe) {
+                        jobject weakRef = env->CallStaticObjectMethod(rtopActivityClass, getMe);
+                        if (weakRef) {
+                            jclass weakRefClass = env->GetObjectClass(weakRef);
+                            jmethodID get = env->GetMethodID(weakRefClass, "get", "()Ljava/lang/Object;");
+                            if (get) {
+                                activity = env->CallObjectMethod(weakRef, get);
+                            }
+                            env->DeleteLocalRef(weakRefClass);
+                            env->DeleteLocalRef(weakRef);
+                        }
+                    }
+                    env->DeleteLocalRef(rtopActivityClass);
+                }
+                if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
+                }
             }
         }
         
@@ -82,6 +113,10 @@ class $modify(MyMenuLayer, MenuLayer) {
             if (launchQuestVRMode && !env->ExceptionCheck()) {
                 log::info("Found launchQuestVRMode, calling it...");
                 env->CallVoidMethod(activity, launchQuestVRMode);
+                
+                // This will put VRManager into a pending state where it will poll
+                // until the launcher bridge successfully provides the new VR Activity.
+                VRManager::get().startVR();
             } else {
                 if (env->ExceptionCheck()) env->ExceptionClear();
                 log::error("Could not find launchQuestVRMode on the current Activity. Is the launcher updated?");
@@ -91,10 +126,6 @@ class $modify(MyMenuLayer, MenuLayer) {
         } else {
             log::error("Could not get JNIEnv or Activity to launch VR Intent.");
         }
-        
-        // This will put VRManager into a pending state where it will poll
-        // until the launcher bridge successfully provides the new VR Activity.
-        VRManager::get().startVR();
 #else
         log::info("Toggle VR is only supported on Android (Meta Quest).");
 #endif
