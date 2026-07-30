@@ -119,10 +119,11 @@ bool OpenXRManager::initialise() {
         return false;
     }
 
-    log::info(
-        hasActivity ? "OpenXR: Android Activity acquired"
-                    : "OpenXR: Using Android application context fallback"
-    );
+    if (hasActivity) {
+        log::info("OpenXR: Android Activity acquired");
+    } else {
+        log::info("OpenXR: Using Android application context fallback");
+    }
 
 
     PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
