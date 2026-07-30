@@ -47,32 +47,54 @@ bool OpenXRManager::initialise() {
     // Cocos2dxHelper keeps the real Activity in a static field after startup.
     // An Application object is not sufficient for
     // XrInstanceCreateInfoAndroidKHR::applicationActivity.
-    jclass helperClass = env->FindClass("org/cocos2dx/lib/Cocos2dxHelper");
-    if (!helperClass || env->ExceptionCheck()) {
-        if (env->ExceptionCheck()) env->ExceptionClear();
-        log::error("OpenXR: Could not find org.cocos2dx.lib.Cocos2dxHelper");
-        if (attached) vm->DetachCurrentThread();
-        return false;
-    }
+    jobject activity = nullptr;
 
-    jfieldID activityField = env->GetStaticFieldID(
-        helperClass,
-        "sActivity",
-        "Landroid/app/Activity;"
-    );
-    if (!activityField || env->ExceptionCheck()) {
+    // Older Cocos2d-x builds keep the activity in this field.
+    jclass helperClass = env->FindClass("org/cocos2dx/lib/Cocos2dxHelper");
+    if (helperClass && !env->ExceptionCheck()) {
+        jfieldID activityField = env->GetStaticFieldID(
+            helperClass, "sActivity", "Landroid/app/Activity;"
+        );
+        if (activityField && !env->ExceptionCheck()) {
+            activity = env->GetStaticObjectField(helperClass, activityField);
+        }
         if (env->ExceptionCheck()) env->ExceptionClear();
         env->DeleteLocalRef(helperClass);
-        log::error("OpenXR: Could not find Cocos2dxHelper.sActivity");
+    } else if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+
+    // Geometry Dash's Cocos build does not expose Cocos2dxHelper.sActivity.
+    // Its public getContext() returns the actual Cocos2dxActivity instance.
+    if (!activity) {
+        jclass activityClass = env->FindClass("org/cocos2dx/lib/Cocos2dxActivity");
+        if (activityClass && !env->ExceptionCheck()) {
+            jmethodID getContext = env->GetStaticMethodID(
+                activityClass, "getContext", "()Landroid/content/Context;"
+            );
+            if (getContext && !env->ExceptionCheck()) {
+                activity = env->CallStaticObjectMethod(activityClass, getContext);
+            }
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            env->DeleteLocalRef(activityClass);
+        } else if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
+
+    if (!activity) {
+        log::error("OpenXR: Could not obtain the live Cocos2dx Activity");
         if (attached) vm->DetachCurrentThread();
         return false;
     }
 
-    jobject activity = env->GetStaticObjectField(helperClass, activityField);
-    env->DeleteLocalRef(helperClass);
-    if (!activity || env->ExceptionCheck()) {
-        if (env->ExceptionCheck()) env->ExceptionClear();
-        log::error("OpenXR: Cocos2dxHelper.sActivity is null");
+    jclass androidActivityClass = env->FindClass("android/app/Activity");
+    const bool isActivity = androidActivityClass && env->IsInstanceOf(activity, androidActivityClass);
+    if (androidActivityClass) env->DeleteLocalRef(androidActivityClass);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (!isActivity) {
+        log::error("OpenXR: Cocos context is not an android.app.Activity");
+        env->DeleteLocalRef(activity);
         if (attached) vm->DetachCurrentThread();
         return false;
     }
