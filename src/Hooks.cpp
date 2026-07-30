@@ -3,6 +3,10 @@
 #include <Geode/modify/MenuLayer.hpp>
 #include "VRManager.hpp"
 
+#ifdef GEODE_IS_ANDROID
+#include <Geode/cocos/platform/android/jni/JniHelper.h>
+#endif
+
 using namespace geode::prelude;
 
 class $modify(MyEGLView, CCEGLView) {
@@ -31,9 +35,7 @@ class $modify(MyMenuLayer, MenuLayer) {
         auto menu = CCMenu::create();
         menu->setID("gdvr-menu");
 
-        auto btnSprite = CircleButtonSprite::create(
-            CCLabelBMFont::create("VR", "bigFont.fnt")
-        );
+        auto btnSprite = ButtonSprite::create("VR", "bigFont.fnt", "GJ_button_01.png");
         btnSprite->setScale(0.6f);
         
         auto btn = CCMenuItemSpriteExtra::create(
