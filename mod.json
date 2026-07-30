@@ -8,5 +8,8 @@
 	"version": "v1.0.0",
 	"developer": "OmgRod",
 	"description": "This mod turns Geometry Dash into a VR game.",
+	"dependencies": {
+		"geode.node-ids": ">=v1.23.3"
+	},
 	"early-load": true
 }
